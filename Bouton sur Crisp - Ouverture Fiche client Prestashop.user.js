@@ -6,8 +6,8 @@
 // @description  Ajoute un bouton dans Crisp sous l'email pour rechercher dans PrestaShop + clic auto sur la page d’avertissement.
 // @match        https://app.crisp.chat/*
 // @match        https://www.tousergo.com/admin_ps_t_fr/*
-// @downloadURL  hthttps://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.user.js
-// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.user.js
+// @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/Bouton%20sur%20Crisp%20-%20Ouverture%20Fiche%20client%20Prestashop.user.js
+// @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/Bouton%20sur%20Crisp%20-%20Ouverture%20Fiche%20client%20Prestashop.user.js
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
