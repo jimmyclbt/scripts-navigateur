@@ -1,10 +1,12 @@
 // ==UserScript==
-// @name         Bouton sur Amazon/Mirakl - Ouverture commande Prestashop
+// @name         Bouton Marketplaces - Ouverture commande Prestashop
 // @namespace    http://tampermonkey.net/
 // @version      3.1
 // @description  Ajoute un bouton “Ouvrir dans Presta” pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
 // @match        *://adeo-marketplace.mirakl.net/*
+// @downloadURL  https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/main/Bouton%20sur%20Marketplaces%20-%20Ouverture%20commande%20Prestashop.user.js
+// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/main/Bouton%20sur%20Marketplaces%20-%20Ouverture%20commande%20Prestashop.user.js
 // @grant        none
 // ==/UserScript==
 
