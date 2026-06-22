@@ -1,10 +1,14 @@
 // ==UserScript==
 // @name         Bouton sur Crisp - Ouverture Fiche client Prestashop
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  Ajoute un bouton dans Crisp sous l'email pour rechercher dans PrestaShop + clic auto sur la page d’avertissement. test
+// @version      1.3
+// @author       Jimmy COCQUEREL-BUSCOT
+// @description  Ajoute un bouton dans Crisp sous l'email pour rechercher dans PrestaShop + clic auto sur la page d’avertissement.
 // @match        https://app.crisp.chat/*
 // @match        https://www.tousergo.com/admin_ps_t_fr/*
+// @downloadURL  hthttps://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.user.js
+// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.user.js
+// @grant        none
 // @run-at       document-end
 // ==/UserScript==
 
