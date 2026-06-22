@@ -7,8 +7,8 @@
 // @match        https://app.crisp.chat/*
 // @match        https://www.tousergo.com/*
 // @match        https://www.tousergo.com/admin_ps_t_fr/index.php*
-// @downloadURL  hthttps://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.txt
-// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.txt
+// @downloadURL  hthttps://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.user.js
+// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Lien%20sur%20re%CC%81fe%CC%81rence%20de%20commande%20pour%20redirection%20Odoo.user.js
 // @grant        none
 // ==/UserScript==
 
