@@ -5,8 +5,8 @@
 // @description  Ajoute un bouton “Ouvrir dans Presta” pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
 // @match        *://adeo-marketplace.mirakl.net/*
-// @downloadURL  https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/main/Bouton%20sur%20Marketplaces%20-%20Ouverture%20commande%20Prestashop.user.js
-// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/main/Bouton%20sur%20Marketplaces%20-%20Ouverture%20commande%20Prestashop.user.js
+// @downloadURL  https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Bouton%20sur%20Marketplaces%20-%20Ouverture%20commande%20Prestashop.txt
+// @updateURL    https://raw.githubusercontent.com/jimmyclbt/scripts-navigateur/refs/heads/main/Bouton%20sur%20Marketplaces%20-%20Ouverture%20commande%20Prestashop.txt
 // @grant        none
 // ==/UserScript==
 
