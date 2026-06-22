@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bouton Marketplaces - Ouverture commande Prestashop
 // @namespace    http://tampermonkey.net/
-// @version      3.3
+// @version      3.4
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute un bouton “Ouvrir dans Presta” pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
