@@ -9,6 +9,8 @@
 // @connect      tousergo.eggs-solutions.fr
 // @connect      www.tousergo.com
 // @grant        GM_xmlhttpRequest
+// @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/DEV%20-%20Marketplaces.user.js
+// @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/DEV%20-%20Marketplaces.user.js
 // ==/UserScript==
 
 (function() {
