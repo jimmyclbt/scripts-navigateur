@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Lien sur référence de commande pour redirection Odoo
+// @name         Lien sur référence de commande pour redirection Odoo 1
 // @namespace    http://tampermonkey.net/
 // @version      2.0
 // @author       Jimmy COCQUEREL-BUSCOT
