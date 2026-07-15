@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DEV - Bouton Crisp vers Prestashop TEST
+// @name         DEV - Bouton Crisp vers Prestashop
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute un bouton dans Crisp sous l'email pour rechercher dans PrestaShop + clic auto sur la page d’avertissement.
 // @match        https://app.crisp.chat/*
