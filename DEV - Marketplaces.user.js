@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Boutons Marketplaces - Ouverture directe Odoo + Prestashop + bouton facture
+// @name         DEV - Marketplaces.user.js
 // @namespace    http://tampermonkey.net/
 // @version      6.0
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Ajoute les boutons "Ouvrir dans Odoo" (via API) et "Ouvrir dans Presta" pour toutes les références commande sur Amazon et Mirakl
+// @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta" et "Télécharger facture" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
 // @match        *://adeo-marketplace.mirakl.net/*
 // @connect      tousergo.eggs-solutions.fr
