@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Bouton sur Crisp - Ouverture Fiche client Prestashop
+// @name         DEV - Bouton Crisp vers Prestashop
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.0
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute un bouton dans Crisp sous l'email pour rechercher dans PrestaShop + clic auto sur la page d’avertissement.
 // @match        https://app.crisp.chat/*
