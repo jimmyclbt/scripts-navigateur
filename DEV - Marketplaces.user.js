@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         DEV - Marketplaces.user.js
+// @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
 // @version      6.0
 // @author       Jimmy COCQUEREL-BUSCOT
