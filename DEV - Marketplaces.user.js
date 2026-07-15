@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
-// @version      6.0
+// @version      6.1
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta" et "Télécharger facture" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
@@ -475,6 +475,7 @@
             wrapper.style.marginTop = "6px";
             wrapper.style.marginBottom = "6px";
             wrapper.style.width = "100%";
+            wrapper.style.gridColumn = "1 / -1"; // au cas où le parent serait en CSS Grid (ex: panneau Mirakl)
             insertionParent.insertBefore(wrapper, row.nextSibling);
         }
 
@@ -505,6 +506,11 @@
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
         let node;
         while(node = walker.nextNode()) {
+            // On saute le texte à l'intérieur des liens de commande Mirakl (panneau "Informations") :
+            // ils sont gérés séparément en mode "bloc" ci-dessous, sinon la référence serait traitée
+            // deux fois (une fois en ligne dans le lien, cassant son affichage, une fois en bloc vide).
+            if (node.parentNode.closest && node.parentNode.closest('a[href^="/mmp/shop/order/"]')) continue;
+
             const matches = node.textContent.match(regex);
             if(matches) {
                 matches.forEach(ref => addAllButtons(node.parentNode, ref));
@@ -530,6 +536,11 @@
         // Amazon : <a> classiques
         document.querySelectorAll('td a').forEach(a => {
             a.textContent.match(regex)?.forEach(ref => addAllButtons(a, ref));
+        });
+        // Mirakl : lien de commande dans le panneau "Informations" (colonne de droite) — en mode bloc,
+        // nouvelle ligne sous le lien, pour éviter d'insérer un bouton à l'intérieur du <a> lui-même
+        document.querySelectorAll('a[href^="/mmp/shop/order/"]').forEach(a => {
+            a.textContent.trim().match(regex)?.forEach(ref => addAllButtonsBlock(a, ref));
         });
         // Mirakl : traverse tout le DOM
         traverseNodes(document.body);
