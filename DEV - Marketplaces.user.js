@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DEV - Marketplaces TEST
+// @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta" et "Télécharger facture" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
@@ -117,21 +117,16 @@
     // Retourne l'élément bouton (nouveau ou déjà existant) pour pouvoir chaîner les insertions
     function addButton(node, text, { type, label, bgColor, onClick, insertAfter, container }) {
         if (container) {
-            // Mode "bloc" : les boutons sont ajoutés dans un conteneur dédié (nouvelle ligne), pas en ligne dans le texte
+            // Mode "bloc" : les boutons sont ajoutés dans un conteneur dédié (nouvelle ligne), pas en ligne dans le texte.
+            // La dédup reste LOCALE à ce conteneur (pas de vérification globale via processedRefs) : une même référence
+            // peut légitimement apparaître à plusieurs endroits distincts de la page (ex: fil "Retour à la commande"
+            // ET panneau "Informations"), chacun doit avoir ses propres boutons.
             const existingInContainer = container.querySelector(`button[data-bo-button="${type}"]`);
             if (existingInContainer) return existingInContainer;
-
-            const key = `${type}:${text}`;
-            const existing = processedRefs.get(key);
-            if (existing) {
-                if (isVisible(existing)) return existing;
-                existing.remove();
-            }
 
             const button = document.createElement("button");
             button.dataset.boRef = text;
             button.dataset.boButton = type;
-            processedRefs.set(key, button);
             button.textContent = label;
             button.style.padding = "4px 8px";
             button.style.fontSize = "12px";
@@ -511,6 +506,10 @@
             // deux fois (une fois en ligne dans le lien, cassant son affichage, une fois en bloc vide).
             if (node.parentNode.closest && node.parentNode.closest('a[href^="/mmp/shop/order/"]')) continue;
 
+            // On saute aussi le contenu des messages de la conversation Mirakl (data-card) : la référence
+            // de commande y apparaît souvent dans le texte du message lui-même, on ne veut pas de bouton là.
+            if (node.parentNode.closest && node.parentNode.closest('[data-card]')) continue;
+
             const matches = node.textContent.match(regex);
             if(matches) {
                 matches.forEach(ref => addAllButtons(node.parentNode, ref));
@@ -537,13 +536,18 @@
         document.querySelectorAll('td a').forEach(a => {
             a.textContent.match(regex)?.forEach(ref => addAllButtons(a, ref));
         });
-        // Mirakl : lien de commande dans le panneau "Informations" (colonne de droite) — en mode bloc,
-        // nouvelle ligne sous le lien, pour éviter d'insérer un bouton à l'intérieur du <a> lui-même
-        document.querySelectorAll('a[href^="/mmp/shop/order/"]').forEach(a => {
+        // Mirakl : lien de commande dans le panneau "Informations" (colonne de droite) uniquement — en mode bloc,
+        // nouvelle ligne sous le lien. On restreint au panneau (data-testid="CUSTOMER_SUB_SECTION") pour exclure
+        // le lien "Retour à la commande" en haut de page (même format d'URL, mais on ne veut pas les boutons là).
+        document.querySelectorAll('[data-testid="CUSTOMER_SUB_SECTION"] a[href^="/mmp/shop/order/"]').forEach(a => {
             a.textContent.trim().match(regex)?.forEach(ref => addAllButtonsBlock(a, ref));
         });
-        // Mirakl : traverse tout le DOM
-        traverseNodes(document.body);
+        // traverseNodes (scan généraliste du texte) ne doit s'exécuter que sur Amazon désormais.
+        // Sur Mirakl, on ne veut les boutons QUE dans le panneau "Informations" (sélecteur dédié ci-dessus) —
+        // le scan généraliste faisait apparaître des boutons non désirés ailleurs (listes, messages, etc.).
+        if (!location.hostname.includes('mirakl')) {
+            traverseNodes(document.body);
+        }
     }
 
     const observer = new MutationObserver(processPage);
