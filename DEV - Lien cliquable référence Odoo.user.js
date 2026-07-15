@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DEV - Lien cliquable référence Odoo TEST
+// @name         DEV - Lien cliquable référence Odoo
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Transforme les références PrestaShop (9 lettres majuscules) en liens vers Odoo dans Crisp et dans le site TOUS ERGO, sans toucher aux champs éditables
 // @match        https://app.crisp.chat/*
