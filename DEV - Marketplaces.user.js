@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DEV - Marketplaces
+// @name         DEV - Marketplaces TEST
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta" et "Télécharger facture" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
