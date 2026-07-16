@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta" et "Télécharger facture" pour toutes les références commande sur Amazon et Mirakl
+// @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta", "Télécharger facture" et "Suivi colis" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
 // @match        *://adeo-marketplace.mirakl.net/*
 // @connect      tousergo.eggs-solutions.fr
@@ -108,8 +108,8 @@
         });
     }
 
-    // Crée un bouton générique (Odoo ou Presta) juste après `node`, pour la référence `text`
-    // - type : identifiant unique ("odoo" / "presta") pour la déduplication
+    // Crée un bouton générique (Odoo, Presta, Facture ou Suivi) juste après `node`, pour la référence `text`
+    // - type : identifiant unique ("odoo" / "presta" / "facture" / "colis") pour la déduplication
     // - label : texte du bouton
     // - bgColor : couleur de fond
     // - onClick(text, buttonEl) : action au clic
@@ -425,8 +425,141 @@
         });
     }
 
+    // Récupère le lien de suivi transporteur (carrier_tracking_url) depuis le/les bon(s) de livraison
+    // sortant(s) liés à la commande, et l'ouvre dans un nouvel onglet.
+    function trackParcel(marketplaceRef, button) {
+        button.textContent = "Recherche colis...";
+        button.style.backgroundColor = "#ff9900";
+
+        const resetButton = () => {
+            setTimeout(() => {
+                button.textContent = "Suivi colis";
+                button.style.backgroundColor = "#0073bb";
+            }, 3000);
+        };
+
+        const searchData = {
+            jsonrpc: "2.0",
+            method: "call",
+            params: {
+                model: "sale.order",
+                method: "search_read",
+                args: [
+                    [
+                        '|', '|',
+                        ['eggs_id_transaction', '=', marketplaceRef],
+                        ['eggs_id_commande', '=', marketplaceRef],
+                        ['eggs_ref_commande', '=', marketplaceRef]
+                    ],
+                    ['id', 'picking_ids']
+                ],
+                kwargs: { limit: 1 }
+            },
+            id: Math.floor(Math.random() * 1000000)
+        };
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: `${odooBaseURL}/web/dataset/call_kw`,
+            headers: { "Content-Type": "application/json" },
+            data: JSON.stringify(searchData),
+            onload: function(orderResponse) {
+                let orderData;
+                try {
+                    orderData = JSON.parse(orderResponse.responseText);
+                } catch (e) {
+                    alert("Erreur de traitement Odoo. Assurez-vous d'être connecté.");
+                    button.textContent = "Erreur";
+                    button.style.backgroundColor = "#dc3545";
+                    resetButton();
+                    return;
+                }
+
+                if (orderData.error || !orderData.result || orderData.result.length === 0) {
+                    alert("Commande introuvable dans Odoo.");
+                    button.textContent = "Non trouvé";
+                    button.style.backgroundColor = "#dc3545";
+                    resetButton();
+                    return;
+                }
+
+                const pickingIds = orderData.result[0].picking_ids;
+                if (!pickingIds || pickingIds.length === 0) {
+                    alert("Aucun bon de livraison lié à cette commande dans Odoo.");
+                    button.textContent = "Pas de livraison";
+                    button.style.backgroundColor = "#dc3545";
+                    resetButton();
+                    return;
+                }
+
+                const pickingData = {
+                    jsonrpc: "2.0",
+                    method: "call",
+                    params: {
+                        model: "stock.picking",
+                        method: "search_read",
+                        args: [
+                            [['id', 'in', pickingIds]],
+                            ['carrier_tracking_url', 'carrier_tracking_ref', 'state', 'picking_type_code']
+                        ],
+                        kwargs: {}
+                    },
+                    id: Math.floor(Math.random() * 1000000)
+                };
+
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: `${odooBaseURL}/web/dataset/call_kw`,
+                    headers: { "Content-Type": "application/json" },
+                    data: JSON.stringify(pickingData),
+                    onload: function(pickingResponse) {
+                        let pickingResult;
+                        try {
+                            pickingResult = JSON.parse(pickingResponse.responseText);
+                        } catch (e) {
+                            alert("Erreur lors de la récupération du bon de livraison.");
+                            button.textContent = "Erreur";
+                            button.style.backgroundColor = "#dc3545";
+                            resetButton();
+                            return;
+                        }
+
+                        // On ne s'intéresse qu'aux BL sortants (livraison client), pas aux réceptions/retours
+                        const pickings = (pickingResult.result || []).filter(p => p.picking_type_code === 'outgoing');
+                        console.log("[Suivi colis] Bons de livraison sortants :", pickings);
+
+                        // Priorité au BL confirmé/expédié ("done") s'il a un lien de suivi, sinon le premier disponible
+                        const withTracking = pickings.filter(p => p.carrier_tracking_url);
+                        const chosen = withTracking.find(p => p.state === 'done') || withTracking[0];
+
+                        if (chosen && chosen.carrier_tracking_url) {
+                            window.open(chosen.carrier_tracking_url, "_blank");
+                            button.textContent = "Suivi ouvert !";
+                            button.style.backgroundColor = "#28a745";
+                        } else {
+                            alert("Aucun lien de suivi disponible pour cette commande (transporteur non renseigné ou colis pas encore expédié).");
+                            button.textContent = "Pas de suivi";
+                            button.style.backgroundColor = "#dc3545";
+                        }
+                        resetButton();
+                    },
+                    onerror: function() {
+                        button.textContent = "Erreur Réseau";
+                        button.style.backgroundColor = "#dc3545";
+                        resetButton();
+                    }
+                });
+            },
+            onerror: function() {
+                button.textContent = "Erreur Réseau";
+                button.style.backgroundColor = "#dc3545";
+                resetButton();
+            }
+        });
+    }
+
     function addAllButtons(node, text) {
-        // Odoo d'abord, puis Presta, puis Télécharger facture — chaque bouton ancré sur le précédent
+        // Odoo d'abord, puis Presta, puis Télécharger facture, puis Suivi colis — chaque bouton ancré sur le précédent
         const odooBtn = addButton(node, text, {
             type: "odoo",
             label: "Ouvrir dans Odoo",
@@ -440,16 +573,23 @@
             onClick: (ref, btn) => openPrestaOrder(ref, btn),
             insertAfter: odooBtn || node
         });
-        addButton(node, text, {
+        const factureBtn = addButton(node, text, {
             type: "facture",
             label: "Télécharger facture",
             bgColor: "#232f3e",
             onClick: (ref, btn) => downloadOdooInvoice(ref, btn),
             insertAfter: prestaBtn || odooBtn || node
         });
+        addButton(node, text, {
+            type: "colis",
+            label: "Suivi colis",
+            bgColor: "#0073bb",
+            onClick: (ref, btn) => trackParcel(ref, btn),
+            insertAfter: factureBtn || prestaBtn || odooBtn || node
+        });
     }
 
-    // Variante "bloc" : les 3 boutons sont empilés dans un conteneur dédié sur une nouvelle ligne,
+    // Variante "bloc" : les 4 boutons sont empilés dans un conteneur dédié sur une nouvelle ligne,
     // au lieu d'être insérés en ligne au fil du texte (utile dans les panneaux étroits, ex: messagerie Amazon)
     function addAllButtonsBlock(node, text) {
         if (!isVisible(node)) return;
@@ -493,6 +633,13 @@
             label: "Télécharger facture",
             bgColor: "#232f3e",
             onClick: (ref, btn) => downloadOdooInvoice(ref, btn),
+            container: wrapper
+        });
+        addButton(node, text, {
+            type: "colis",
+            label: "Suivi colis",
+            bgColor: "#0073bb",
+            onClick: (ref, btn) => trackParcel(ref, btn),
             container: wrapper
         });
     }
