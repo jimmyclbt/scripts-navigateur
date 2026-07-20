@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.6
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta", "Télécharger facture" et "Suivi colis" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
@@ -124,28 +124,20 @@
             const existingInContainer = container.querySelector(`button[data-bo-button="${type}"]`);
             if (existingInContainer) return existingInContainer;
 
-const button = document.createElement("button");
-        button.dataset.boRef = text;
-        button.dataset.boButton = type;
-        processedRefs.set(key, button);
-        button.textContent = label;
-        button.style.display = "block";
-        button.style.width = "fit-content";
-        button.style.marginTop = "4px";
-        button.style.marginLeft = "0";
-        button.style.padding = "2px 5px";
-        button.style.fontSize = "12px";
-        button.style.lineHeight = "normal";
-        button.style.cursor = "pointer";
-        button.style.backgroundColor = bgColor;
-        button.style.color = "white";
-        button.style.border = "none";
-        button.style.borderRadius = "3px";
-
-        button.addEventListener("click", () => onClick(text, button));
-
-        node.parentNode.insertBefore(button, anchor.nextSibling);
-        return button;
+            const button = document.createElement("button");
+            button.dataset.boRef = text;
+            button.dataset.boButton = type;
+            button.textContent = label;
+            button.style.padding = "4px 8px";
+            button.style.fontSize = "12px";
+            button.style.cursor = "pointer";
+            button.style.backgroundColor = bgColor;
+            button.style.color = "white";
+            button.style.border = "none";
+            button.style.borderRadius = "3px";
+            button.addEventListener("click", () => onClick(text, button));
+            container.appendChild(button);
+            return button;
         }
 
         const anchor = insertAfter || node;
@@ -566,50 +558,34 @@ const button = document.createElement("button");
         });
     }
 
-function addAllButtons(node, text) {
-        if (!isVisible(node)) return;
-
-        // Conteneur dédié en colonne, inséré juste après le lien de commande.
-        // Garantit un empilement vertical même si le parent est lui-même en flex-row.
-        let wrapper = node.nextSibling;
-        if (!(wrapper && wrapper.dataset && wrapper.dataset.boWrapper === text)) {
-            wrapper = document.createElement("div");
-            wrapper.dataset.boWrapper = text;
-            wrapper.style.display = "flex";
-            wrapper.style.flexDirection = "column";
-            wrapper.style.alignItems = "flex-start";
-            wrapper.style.gap = "4px";
-            wrapper.style.marginTop = "4px";
-            node.parentNode.insertBefore(wrapper, node.nextSibling);
-        }
-
-        addButton(node, text, {
+    function addAllButtons(node, text) {
+        // Odoo d'abord, puis Presta, puis Télécharger facture, puis Suivi colis — chaque bouton ancré sur le précédent
+        const odooBtn = addButton(node, text, {
             type: "odoo",
             label: "Ouvrir dans Odoo",
             bgColor: "#714B67",
-            onClick: (ref, btn) => openOdooOrderViaAPI(ref, btn),
-            container: wrapper
+            onClick: (ref, btn) => openOdooOrderViaAPI(ref, btn)
         });
-        addButton(node, text, {
+        const prestaBtn = addButton(node, text, {
             type: "presta",
             label: "Ouvrir dans Presta",
             bgColor: "#df0067",
             onClick: (ref, btn) => openPrestaOrder(ref, btn),
-            container: wrapper
+            insertAfter: odooBtn || node
         });
-        addButton(node, text, {
+        const factureBtn = addButton(node, text, {
             type: "facture",
             label: "Télécharger facture",
             bgColor: "#232f3e",
             onClick: (ref, btn) => downloadOdooInvoice(ref, btn),
-            container: wrapper
+            insertAfter: prestaBtn || odooBtn || node
         });
         addButton(node, text, {
             type: "colis",
             label: "Suivi colis",
             bgColor: "#0073bb",
             onClick: (ref, btn) => trackParcel(ref, btn),
-            container: wrapper
+            insertAfter: factureBtn || prestaBtn || odooBtn || node
         });
     }
 
