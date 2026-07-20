@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta", "Télécharger facture" et "Suivi colis" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
@@ -124,20 +124,28 @@
             const existingInContainer = container.querySelector(`button[data-bo-button="${type}"]`);
             if (existingInContainer) return existingInContainer;
 
-            const button = document.createElement("button");
-            button.dataset.boRef = text;
-            button.dataset.boButton = type;
-            button.textContent = label;
-            button.style.padding = "4px 8px";
-            button.style.fontSize = "12px";
-            button.style.cursor = "pointer";
-            button.style.backgroundColor = bgColor;
-            button.style.color = "white";
-            button.style.border = "none";
-            button.style.borderRadius = "3px";
-            button.addEventListener("click", () => onClick(text, button));
-            container.appendChild(button);
-            return button;
+const button = document.createElement("button");
+        button.dataset.boRef = text;
+        button.dataset.boButton = type;
+        processedRefs.set(key, button);
+        button.textContent = label;
+        button.style.display = "block";
+        button.style.width = "fit-content";
+        button.style.marginTop = "4px";
+        button.style.marginLeft = "0";
+        button.style.padding = "2px 5px";
+        button.style.fontSize = "12px";
+        button.style.lineHeight = "normal";
+        button.style.cursor = "pointer";
+        button.style.backgroundColor = bgColor;
+        button.style.color = "white";
+        button.style.border = "none";
+        button.style.borderRadius = "3px";
+
+        button.addEventListener("click", () => onClick(text, button));
+
+        node.parentNode.insertBefore(button, anchor.nextSibling);
+        return button;
         }
 
         const anchor = insertAfter || node;
