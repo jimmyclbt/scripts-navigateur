@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DEV - Marketplaces
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Ajoute les boutons "Ouvrir dans Odoo" (via API), "Ouvrir dans Presta", "Télécharger facture" et "Suivi colis" pour toutes les références commande sur Amazon et Mirakl
 // @match        *://sellercentral.amazon.fr/*
@@ -566,34 +566,50 @@ const button = document.createElement("button");
         });
     }
 
-    function addAllButtons(node, text) {
-        // Odoo d'abord, puis Presta, puis Télécharger facture, puis Suivi colis — chaque bouton ancré sur le précédent
-        const odooBtn = addButton(node, text, {
+function addAllButtons(node, text) {
+        if (!isVisible(node)) return;
+
+        // Conteneur dédié en colonne, inséré juste après le lien de commande.
+        // Garantit un empilement vertical même si le parent est lui-même en flex-row.
+        let wrapper = node.nextSibling;
+        if (!(wrapper && wrapper.dataset && wrapper.dataset.boWrapper === text)) {
+            wrapper = document.createElement("div");
+            wrapper.dataset.boWrapper = text;
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.alignItems = "flex-start";
+            wrapper.style.gap = "4px";
+            wrapper.style.marginTop = "4px";
+            node.parentNode.insertBefore(wrapper, node.nextSibling);
+        }
+
+        addButton(node, text, {
             type: "odoo",
             label: "Ouvrir dans Odoo",
             bgColor: "#714B67",
-            onClick: (ref, btn) => openOdooOrderViaAPI(ref, btn)
+            onClick: (ref, btn) => openOdooOrderViaAPI(ref, btn),
+            container: wrapper
         });
-        const prestaBtn = addButton(node, text, {
+        addButton(node, text, {
             type: "presta",
             label: "Ouvrir dans Presta",
             bgColor: "#df0067",
             onClick: (ref, btn) => openPrestaOrder(ref, btn),
-            insertAfter: odooBtn || node
+            container: wrapper
         });
-        const factureBtn = addButton(node, text, {
+        addButton(node, text, {
             type: "facture",
             label: "Télécharger facture",
             bgColor: "#232f3e",
             onClick: (ref, btn) => downloadOdooInvoice(ref, btn),
-            insertAfter: prestaBtn || odooBtn || node
+            container: wrapper
         });
         addButton(node, text, {
             type: "colis",
             label: "Suivi colis",
             bgColor: "#0073bb",
             onClick: (ref, btn) => trackParcel(ref, btn),
-            insertAfter: factureBtn || prestaBtn || odooBtn || node
+            container: wrapper
         });
     }
 
