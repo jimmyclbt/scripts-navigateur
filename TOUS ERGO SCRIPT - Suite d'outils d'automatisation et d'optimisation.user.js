@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         TOUS ERGO SCRIPT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      1.1
+// @version      1.2
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, automatisation Crisp, boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro.
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, automatisation Crisp, boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
@@ -18,9 +18,8 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_closeTab
+// @grant        GM_registerMenuCommand
 // @run-at       document-idle
-// @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
-// @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
 // ==/UserScript==
 
 /*
@@ -40,6 +39,7 @@
  *   4. DEV - Bouton Crisp vers Prestashop
  *   5. DEV - Lien cliquable référence Odoo
  *   6. DEV - Fermeture auto onglet après synchro réussie
+ *   7. DEV - Levée de fiche téléphone (3CX -> recherche client PrestaShop)
  * ============================================================================
  */
 
@@ -121,6 +121,51 @@
         priorityGroupValues: ['69', '26', '67'],
 
         defaultEncours: 5000,
+
+        // ==========================================================
+        // VALIDATION DE COMPTE EN 1 CLIC — 4 raccourcis combinant
+        // groupe + encours + délai de paiement + envoi du mail Crisp
+        // correspondant (raccourci "!..."). "groupValue" = id_group
+        // PrestaShop (même logique que priorityGroupValues ci-dessus).
+        // ==========================================================
+        validationPresets: [
+          {
+            id: 'pro0-avt',
+            label: 'Pro – 0 % - Avant expédition',
+            shortLabel: 'Pro 0% avt expé',
+            groupValue: '26',
+            encours: 0,
+            delai: 0,
+            macro: '!validé-0%-avt',
+          },
+          {
+            id: 'pro0-30j',
+            label: 'Pro – 0 % - à échéance (30 jours)',
+            shortLabel: 'Pro 0% 30j',
+            groupValue: '69',
+            encours: 5000,
+            delai: 30,
+            macro: '!validé-0%-30j',
+          },
+          {
+            id: 'pro0-45j',
+            label: 'Pro – 0 % - à échéance (45 jours)',
+            shortLabel: 'Pro 0% 45j',
+            groupValue: '69',
+            encours: 5000,
+            delai: 45,
+            macro: '!validé-0%-45j',
+          },
+          {
+            id: 'revendeur15-avt',
+            label: 'Revendeur – 15 % - Avant expé',
+            shortLabel: 'Revendeur 15%',
+            groupValue: '67',
+            encours: 0,
+            delai: 0,
+            macro: '!validé-15%-revendeur',
+          },
+        ],
       },
 
       // ==========================================================
@@ -407,6 +452,14 @@
       }
       .te-qa-btn:hover { background: #25b9d7; color: #fff; }
       .te-qa-btn.te-qa-primary { background: #25b9d7; color: #fff; }
+      .te-qa-validate-label {
+        font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+        color: #999; font-weight: 600; margin-top: 4px;
+      }
+      .te-qa-btn.te-qa-validate {
+        border-color: #2e9d5e; color: #2e9d5e;
+      }
+      .te-qa-btn.te-qa-validate:hover { background: #2e9d5e; color: #fff; }
       .te-validate-btn {
         margin-top: 16px; padding: 10px 22px; font-size: 14px; font-weight: 600;
         border: none; border-radius: 6px; color: #fff; cursor: pointer;
@@ -819,6 +872,33 @@
     // 3. LANCER LA CRÉATION AUTOMATIQUE DE LA CONVERSATION CRISP
     // ============================================================
 
+    // Prépare l'automatisation Crisp pour un e-mail + raccourci donnés
+    // (mémorise la demande via GM_setValue puis ouvre l'inbox Crisp dans un
+    // nouvel onglet — c'est ce nouvel onglet qui exécutera runCrispAutomation
+    // au chargement, voir bootCrispAutomation plus bas). Retourne un objet
+    // {ok, message} plutôt que de lever, pour rester facile à afficher dans
+    // n'importe quelle modale appelante.
+    function stageCrispMacro(email, macroLabel) {
+      const notConfigured = CONFIG.crisp.inboxUrl.includes('REMPLACE-PAR-TON-WEBSITE-ID');
+      try {
+        GM_setValue('te_crisp_pending', JSON.stringify({
+          email,
+          name: email.split('@')[0],
+          macroLabel,
+          ts: Date.now(),
+        }));
+        // Filet de sécurité : l'e-mail reste aussi dans le presse-papier
+        // si jamais l'automatisation doit être terminée à la main.
+        if (typeof GM_setClipboard === 'function') GM_setClipboard(email);
+
+        const url = notConfigured ? 'https://app.crisp.chat' : CONFIG.crisp.inboxUrl;
+        window.open(url, '_blank');
+        return { ok: true, message: 'Crisp ouvert — l\'automatisation démarre dans le nouvel onglet.' };
+      } catch (err) {
+        return { ok: false, message: `Erreur : ${err.message}` };
+      }
+    }
+
     function openCrispPanel(info) {
       const macroButtons = CONFIG.crisp.macros.map(m => `
         <button type="button" class="te-search-btn" style="display:block; width:100%; margin-bottom:8px; text-align:left;" data-macro="${m}">${m}</button>
@@ -842,23 +922,10 @@
         b.addEventListener('click', () => {
           const macroLabel = b.dataset.macro;
           const statusEl = document.getElementById('te-crisp-status');
-          try {
-            GM_setValue('te_crisp_pending', JSON.stringify({
-              email: info.email,
-              name: info.email.split('@')[0],
-              macroLabel,
-              ts: Date.now(),
-            }));
-            // Filet de sécurité : l'e-mail reste aussi dans le presse-papier
-            // si jamais l'automatisation doit être terminée à la main.
-            if (typeof GM_setClipboard === 'function') GM_setClipboard(info.email);
-
-            const url = notConfigured ? 'https://app.crisp.chat' : CONFIG.crisp.inboxUrl;
-            window.open(url, '_blank');
-            statusEl.innerHTML = '<span class="te-badge-ok">Crisp ouvert — l\'automatisation démarre dans le nouvel onglet.</span>';
-          } catch (err) {
-            statusEl.innerHTML = `<span style="color:#c00">Erreur : ${err.message}</span>`;
-          }
+          const result = stageCrispMacro(info.email, macroLabel);
+          statusEl.innerHTML = result.ok
+            ? `<span class="te-badge-ok">${result.message}</span>`
+            : `<span style="color:#c00">${result.message}</span>`;
         });
       });
     }
@@ -893,9 +960,19 @@
             <button type="button" class="te-qa-btn" id="te-qa-siret">🏷️ Vérifier SIRET</button>
             <button type="button" class="te-qa-btn" id="te-qa-account">🔧 Consulter / modifier le compte</button>
           </div>
+          <div class="te-qa-validate-label">Validation de compte</div>
+          <div class="te-qa-row">
+            ${CONFIG.quickActions.validationPresets.map(p => `
+              <button type="button" class="te-qa-btn te-qa-validate" data-preset-id="${p.id}">✅ ${p.shortLabel}</button>
+            `).join('')}
+          </div>
         </div>
       `;
-      noteCard.parentNode.insertBefore(card, noteCard);
+      noteCard.insertAdjacentElement('afterend', card);
+
+      card.querySelectorAll('.te-qa-validate').forEach(btn => {
+        btn.addEventListener('click', () => runValidationPreset(btn.dataset.presetId));
+      });
 
       card.querySelector('#te-qa-loginas').addEventListener('click', () => {
         // Le lien "Login as customer" (module loginas) existe déjà plus bas
@@ -1003,6 +1080,39 @@
       return html;
     }
 
+    // Récupère + parse le formulaire d'édition client (page "Modifier") et
+    // en extrait la liste des groupes disponibles. Factorisé car utilisé à
+    // la fois par "Consulter / modifier le compte" et par les boutons de
+    // "Validation de compte" en 1 clic. Lève une Error avec un message
+    // déjà prêt à afficher (showModal) en cas de problème.
+    async function fetchCustomerEditForm(editLink) {
+      let doc;
+      try {
+        const res = await fetch(editLink, { credentials: 'include' });
+        const html = await res.text();
+        doc = new DOMParser().parseFromString(html, 'text/html');
+      } catch (err) {
+        throw new Error(`Erreur lors du chargement du formulaire client : ${err.message}`);
+      }
+
+      const fields = CONFIG.quickActions.formFields;
+      const anyGroupCb = doc.querySelector(`input[name="${fields.groupCheckbox}"]`);
+      const form = anyGroupCb ? anyGroupCb.closest('form') : doc.querySelector('form');
+      if (!form) {
+        throw new Error(`Formulaire d'édition introuvable dans la page chargée. Vérifie CONFIG.quickActions.formFields.groupCheckbox.`);
+      }
+
+      const allGroups = Array.from(form.querySelectorAll(`input[name="${fields.groupCheckbox}"]`))
+        .map(cb => ({ value: cb.value, label: (cb.closest('label')?.textContent || '').trim(), checked: cb.checked }))
+        .filter(g => g.label && g.label.toLowerCase() !== 'tout sélectionner');
+
+      if (!allGroups.length) {
+        throw new Error(`Aucun groupe trouvé dans le formulaire. Vérifie CONFIG.quickActions.formFields.groupCheckbox.`);
+      }
+
+      return { form, allGroups };
+    }
+
     async function openAccountModal() {
       const editLink = getEditLink();
       if (!editLink) {
@@ -1012,33 +1122,15 @@
 
       showModal(`<h2>Consulter / modifier le compte</h2><p>Chargement du formulaire client...</p>`);
 
-      let doc;
+      let form, allGroups;
       try {
-        const res = await fetch(editLink, { credentials: 'include' });
-        const html = await res.text();
-        doc = new DOMParser().parseFromString(html, 'text/html');
+        ({ form, allGroups } = await fetchCustomerEditForm(editLink));
       } catch (err) {
-        showModal(`<h2>Consulter / modifier le compte</h2><p style="color:#c00">Erreur lors du chargement du formulaire client : ${err.message}</p>`);
+        showModal(`<h2>Consulter / modifier le compte</h2><p style="color:#c00">${err.message}</p>`);
         return;
       }
 
       const fields = CONFIG.quickActions.formFields;
-      const anyGroupCb = doc.querySelector(`input[name="${fields.groupCheckbox}"]`);
-      const form = anyGroupCb ? anyGroupCb.closest('form') : doc.querySelector('form');
-      if (!form) {
-        showModal(`<h2>Consulter / modifier le compte</h2><p style="color:#c00">Formulaire d'édition introuvable dans la page chargée. Vérifie CONFIG.quickActions.formFields.groupCheckbox.</p>`);
-        return;
-      }
-
-      const allGroups = Array.from(form.querySelectorAll(`input[name="${fields.groupCheckbox}"]`))
-        .map(cb => ({ value: cb.value, label: (cb.closest('label')?.textContent || '').trim(), checked: cb.checked }))
-        .filter(g => g.label && g.label.toLowerCase() !== 'tout sélectionner');
-
-      if (!allGroups.length) {
-        showModal(`<h2>Consulter / modifier le compte</h2><p style="color:#c00">Aucun groupe trouvé dans le formulaire. Vérifie CONFIG.quickActions.formFields.groupCheckbox.</p>`);
-        return;
-      }
-
       const currentGroup = allGroups.find(g => g.checked) || allGroups[0];
 
       const defaultSelect = form.querySelector(`select[name="${fields.defaultGroupSelect}"]`);
@@ -1058,6 +1150,83 @@
         currentEncours,
         currentDelai,
       }, editLink, info?.email || null);
+    }
+
+    // ============================================================
+    // 4bis. VALIDATION DE COMPTE EN 1 CLIC
+    //    groupe + encours + délai de paiement + mail Crisp, en un
+    //    seul clic à partir d'un des 4 presets (CONFIG.quickActions.
+    //    validationPresets).
+    // ============================================================
+
+    async function runValidationPreset(presetId) {
+      const preset = CONFIG.quickActions.validationPresets.find(p => p.id === presetId);
+      if (!preset) {
+        showModal(`<h2>Validation de compte</h2><p style="color:#c00">Preset "${presetId}" introuvable dans CONFIG.quickActions.validationPresets.</p>`);
+        return;
+      }
+
+      const editLink = getEditLink();
+      if (!editLink) {
+        showModal(`<h2>Validation de compte</h2><p style="color:#c00">Lien de modification du client introuvable sur cette page.</p>`);
+        return;
+      }
+
+      const info = getCurrentCustomerInfo();
+      if (!info?.email) {
+        showModal(`<h2>Validation de compte</h2><p style="color:#c00">Impossible de récupérer l'e-mail du client sur cette page — nécessaire pour l'envoi Crisp.</p>`);
+        return;
+      }
+
+      showModal(`<h2>Validation — ${preset.label}</h2><p>Chargement du formulaire client...</p>`);
+
+      let form, allGroups;
+      try {
+        ({ form, allGroups } = await fetchCustomerEditForm(editLink));
+      } catch (err) {
+        showModal(`<h2>Validation — ${preset.label}</h2><p style="color:#c00">${err.message}</p>`);
+        return;
+      }
+
+      const targetGroup = allGroups.find(g => g.value === preset.groupValue);
+      if (!targetGroup) {
+        showModal(`<h2>Validation — ${preset.label}</h2><p style="color:#c00">Groupe id ${preset.groupValue} introuvable dans le formulaire de ce client. Vérifie CONFIG.quickActions.validationPresets (l'id du groupe a peut-être changé côté PrestaShop).</p>`);
+        return;
+      }
+
+      const odooEnabled = CONFIG.odooSync.enabled;
+
+      // Étape de confirmation : cette action modifie le compte ET envoie un
+      // mail au client, donc pas d'exécution silencieuse au clic du bouton.
+      const backdrop = showModal(`
+        <h2>Validation — ${preset.label}</h2>
+        <div class="te-row"><div class="te-row-label">Client</div><div class="te-row-value">${info.email}</div></div>
+        <div class="te-row"><div class="te-row-label">Groupe</div><div class="te-row-value">${targetGroup.label}</div></div>
+        <div class="te-row"><div class="te-row-label">Encours autorisé</div><div class="te-row-value">${preset.encours} €</div></div>
+        <div class="te-row"><div class="te-row-label">Délai de paiement</div><div class="te-row-value">${preset.delai} jours</div></div>
+        <div class="te-row" style="border-bottom:none;"><div class="te-row-label">Mail Crisp</div><div class="te-row-value">raccourci ${preset.macro}</div></div>
+        ${CONFIG.quickActions.dryRun
+          ? `<div class="te-note">Mode test activé (CONFIG.quickActions.dryRun = true) : rien ne sera envoyé, les données seront affichées dans la console (F12).</div>`
+          : `<div class="te-note">Cette action va changer le groupe du compte, mettre à jour l'encours/délai de paiement, puis ouvrir Crisp pour envoyer le mail de validation.</div>`}
+        <button type="button" class="te-validate-btn" id="te-validation-confirm">✓ Confirmer la validation</button>
+      `);
+
+      backdrop.querySelector('#te-validation-confirm').addEventListener('click', async () => {
+        const btn = backdrop.querySelector('#te-validation-confirm');
+        btn.disabled = true;
+        btn.textContent = 'Validation en cours...';
+        await submitCustomerUpdate(
+          form,
+          preset.groupValue,
+          preset.groupValue, // groupe par défaut = même groupe que l'accès pour ces presets
+          preset.encours,
+          preset.delai,
+          editLink,
+          info.email,
+          odooEnabled,
+          preset.macro
+        );
+      });
     }
 
     function renderAccountForm(form, allGroups, current, editLink, customerEmail) {
@@ -1152,7 +1321,7 @@
       return num.toFixed(6).replace('.', ',');
     }
 
-    async function submitCustomerUpdate(form, groupValue, defaultGroupValue, encoursValue, delaiValue, editLink, customerEmail, syncOdoo) {
+    async function submitCustomerUpdate(form, groupValue, defaultGroupValue, encoursValue, delaiValue, editLink, customerEmail, syncOdoo, crispMacro) {
       const fields = CONFIG.quickActions.formFields;
 
       // Coche uniquement le groupe choisi (décoche les autres)
@@ -1188,6 +1357,9 @@
         if (syncOdoo) {
           console.log('%c[TousErgo/Odoo sync] DRY RUN — écrirait', CONFIG.odooSync.encoursField, '=', encoursValue, 'pour', customerEmail);
         }
+        if (crispMacro) {
+          console.log('%c[TousErgo/Crisp] DRY RUN — ouvrirait Crisp avec le raccourci', crispMacro, 'pour', customerEmail);
+        }
         showModal(`<h2>Mode test</h2><p>Rien n'a été envoyé. Le détail des champs qui auraient été soumis est dans la console (F12).</p>`);
         return;
       }
@@ -1217,8 +1389,17 @@
               ? `<p class="te-badge-ok">✓ ${odooResult.message}</p>`
               : `<p style="color:#c00">Synchronisation Odoo échouée : ${odooResult.message}</p>`;
           }
-          showModal(`<h2>Mise à jour effectuée</h2><p>Compte client mis à jour.</p>${odooBlock}<p>La page va se recharger.</p>`);
-          setTimeout(() => location.reload(), odooBlock ? 2200 : 1200);
+
+          let crispBlock = '';
+          if (crispMacro) {
+            const crispResult = stageCrispMacro(customerEmail, crispMacro);
+            crispBlock = crispResult.ok
+              ? `<p class="te-badge-ok">✓ ${crispResult.message}</p>`
+              : `<p style="color:#c00">Envoi Crisp échoué : ${crispResult.message}</p>`;
+          }
+
+          showModal(`<h2>Mise à jour effectuée</h2><p>Compte client mis à jour.</p>${odooBlock}${crispBlock}<p>La page va se recharger.</p>`);
+          setTimeout(() => location.reload(), (odooBlock || crispBlock) ? 2200 : 1200);
         } else {
           showModal(`<h2>Erreur</h2><p style="color:#c00">Erreur lors de l'enregistrement (code ${res.status}). Vérifie manuellement via "Modifier".</p>`);
         }
@@ -1358,6 +1539,35 @@
       }
     }
 
+    // Petite icône copier à côté de l'email du client, dans l'en-tête de
+    // la fiche (ex: <a href="mailto:x@y.fr">x@y.fr</a>).
+    function insertEmailCopyButton() {
+      if (document.getElementById('te-email-copy-btn')) return;
+      const mailLink = document.querySelector('.card-header a[href^="mailto:"]');
+      if (!mailLink) return;
+      const email = mailLink.textContent.trim();
+
+      const copyIconSvg = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+      const checkIconSvg = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'te-email-copy-btn';
+      btn.title = "Copier l'email";
+      btn.innerHTML = copyIconSvg;
+      btn.style.cssText = 'margin-left:6px; border:none; background:none; cursor:pointer; padding:2px; color:#999; vertical-align:middle; display:inline-flex; align-items:center;';
+      btn.addEventListener('mouseenter', () => { btn.style.color = '#25b9d7'; });
+      btn.addEventListener('mouseleave', () => { btn.style.color = '#999'; });
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        GM_setClipboard(email);
+        btn.innerHTML = checkIconSvg;
+        btn.style.color = '#2ba700';
+        setTimeout(() => { btn.innerHTML = copyIconSvg; btn.style.color = '#999'; }, 1200);
+      });
+      mailLink.after(btn);
+    }
+
     // ============================================================
     // Boot
     // ============================================================
@@ -1371,6 +1581,8 @@
           buildDomainCard(info.domain, isGeneric, qaCard);
         }
       }
+
+      insertEmailCopyButton();
     }
 
     // Le thème charge certaines cards de façon asynchrone : on observe le DOM
@@ -1414,37 +1626,153 @@
       return !!(el && el.offsetParent !== null);
     }
 
+    // Beaucoup de boutons Crisp sont des icônes SANS texte visible (crayon
+    // "Nouvelle conversation", avion en papier "Envoyer"...) : le seul
+    // texte disponible se trouve dans aria-label / title / data-tooltip.
+    // On combine tout ça pour ne pas rater ces boutons icône.
+    function elementLabel(el) {
+      return [
+        el.textContent,
+        el.getAttribute('aria-label'),
+        el.getAttribute('title'),
+        el.getAttribute('data-tooltip'),
+        el.getAttribute('data-testid'),
+      ].filter(Boolean).join(' ');
+    }
+
     // Parmi les candidats matchant un texte, on préfère le plus "précis" :
-    // celui dont le texte propre est le plus court, pour éviter d'attraper
-    // un grand conteneur (toolbar, sidebar...) qui contiendrait aussi ce
-    // texte quelque part parmi ses descendants.
+    // celui dont le libellé (texte + attributs) est le plus court, pour
+    // éviter d'attraper un grand conteneur (toolbar, sidebar...) qui
+    // contiendrait aussi ce texte quelque part parmi ses descendants.
     function pickMostSpecific(candidates) {
-      return candidates.sort((a, b) => a.textContent.trim().length - b.textContent.trim().length)[0];
+      return candidates.sort((a, b) => elementLabel(a).trim().length - elementLabel(b).trim().length)[0];
     }
 
-    function findByTextExact(selector, text) {
+    function findByTextExact(selector, text, excludeEl) {
       const candidates = Array.from(document.querySelectorAll(selector))
-        .filter(el => isVisible(el) && el.textContent.trim().toLowerCase() === text.toLowerCase());
+        .filter(el => el !== excludeEl && isVisible(el) && (
+          el.textContent.trim().toLowerCase() === text.toLowerCase() ||
+          (el.getAttribute('aria-label') || '').trim().toLowerCase() === text.toLowerCase() ||
+          (el.getAttribute('title') || '').trim().toLowerCase() === text.toLowerCase()
+        ));
       return candidates.length ? pickMostSpecific(candidates) : null;
     }
 
-    function findByTextIncludes(selector, text, maxLen) {
+    function findByTextIncludes(selector, text, maxLen, excludeEl) {
       let candidates = Array.from(document.querySelectorAll(selector))
-        .filter(el => isVisible(el) && el.textContent.trim().toLowerCase().includes(text.toLowerCase()));
-      if (maxLen) candidates = candidates.filter(el => el.textContent.trim().length <= maxLen);
+        .filter(el => el !== excludeEl && isVisible(el) && elementLabel(el).toLowerCase().includes(text.toLowerCase()));
+      if (maxLen) candidates = candidates.filter(el => elementLabel(el).trim().length <= maxLen);
       return candidates.length ? pickMostSpecific(candidates) : null;
     }
+
+    // Diagnostic : liste tous les éléments cliquables visibles avec leur
+    // libellé (texte + aria-label/title). Appelé uniquement quand
+    // l'automatisation échoue, pour identifier depuis la console (F12)
+    // le bon sélecteur/texte à utiliser si Crisp a changé son interface.
+    function debugDumpClickable() {
+      const els = Array.from(document.querySelectorAll('button, a, div[role="button"], span[role="button"], [aria-label], [title]')).filter(isVisible);
+      console.log(`[TousErgo/Crisp automation][DEBUG] ${els.length} élément(s) cliquable(s) visible(s) :`);
+      els.slice(0, 80).forEach((el, idx) => {
+        console.log(`[DEBUG] clickable#${idx} <${el.tagName.toLowerCase()}> texte:"${el.textContent.trim().slice(0, 40)}" aria-label:"${el.getAttribute('aria-label') || ''}" title:"${el.getAttribute('title') || ''}"`, el);
+      });
+    }
+
+    // Diagnostic complémentaire : Crisp utilise beaucoup de boutons 100%
+    // icône (SVG <use xlink:href="#icon-xxx">, aucun texte ni aria-label).
+    // Liste toutes les icônes visibles avec leur nom (#icon-xxx) et
+    // l'élément cliquable englobant, pour repérer facilement le bon
+    // hrefFragment à passer à findByIconHref si un sélecteur casse.
+    function debugDumpIcons() {
+      const uses = Array.from(document.querySelectorAll('svg use')).filter(u => isVisible(u.closest('svg')));
+      console.log(`[TousErgo/Crisp automation][DEBUG] ${uses.length} icône(s) svg visible(s) :`);
+      uses.slice(0, 80).forEach((u, idx) => {
+        const href = u.getAttribute('xlink:href') || u.getAttribute('href') || '';
+        console.log(`[DEBUG] icon#${idx} href:"${href}"`, u.closest('button, a, div[role="button"]') || u.closest('svg'));
+      });
+    }
+
+    // Trouve le bouton cliquable englobant une icône SVG <use
+    // xlink:href="#icon-xxx">, pour les boutons 100% icône sans texte ni
+    // aria-label (ex. "+" pour "Nouvelle conversation" → #icon-plus).
+    // ancestorHint (optionnel) : si plusieurs icônes identiques existent
+    // sur la page, on préfère celle dont un ancêtre a une classe
+    // contenant ce mot (ex. "header"). excludeEl (optionnel) : ignore un
+    // élément précis (ex. le bouton déjà cliqué à l'étape précédente, qui
+    // peut partager la même icône que le bouton recherché maintenant).
+    function findByIconHref(hrefFragment, ancestorHint, excludeEl) {
+      const uses = Array.from(document.querySelectorAll('svg use'))
+        .filter(u => (u.getAttribute('xlink:href') || u.getAttribute('href') || '').toLowerCase().includes(hrefFragment.toLowerCase()));
+
+      const candidates = [];
+      for (const u of uses) {
+        const svg = u.closest('svg');
+        if (!svg || !isVisible(svg)) continue;
+        let el = svg;
+        let btn = null;
+        for (let hops = 0; hops < 6 && el; hops++) {
+          if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button' ||
+              (el.classList && el.classList.contains('c-base-button'))) { btn = el; break; }
+          el = el.parentElement;
+        }
+        if (!btn) btn = svg.parentElement;
+        if (btn && btn !== excludeEl && isVisible(btn)) candidates.push(btn);
+      }
+      if (!candidates.length) return null;
+      if (ancestorHint) {
+        const hinted = candidates.find(c => c.closest(`[class*="${ancestorHint}" i]`));
+        if (hinted) return hinted;
+      }
+      return candidates[0];
+    }
+
 
     // Un simple .click() ne suffit pas toujours à déclencher les handlers
     // React de certains composants custom : on simule une vraie séquence
     // d'événements souris.
-    function robustClick(el) {
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function robustClick(el) {
       console.log('[TousErgo/Crisp automation] clic sur :', el);
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+      try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) { /* ignore */ }
+      await sleep(60); // laisse le temps au scroll de se stabiliser
+
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      // detail:1 = "premier clic" — certains composants distinguent les
+      // événements avec detail:0 (souvent utilisés par défaut par les
+      // événements construits par script) d'un vrai clic de souris.
+      const mouseOpts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, detail: 1, button: 0, buttons: 1 };
+      const pointerOpts = { ...mouseOpts, pointerId: 1, pointerType: 'mouse', isPrimary: true, width: 1, height: 1, pressure: 0.5 };
+
+      // pointerdown/pointerup en vrais PointerEvent (certains composants
+      // vérifient pointerType/pointerId, un MouseEvent nommé "pointerdown"
+      // ne suffit pas toujours) — avec repli sur MouseEvent si PointerEvent
+      // n'existe pas dans l'environnement.
+      const dispatch = (type, isPointer) => {
         try {
-          el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+          const Ctor = isPointer && typeof PointerEvent !== 'undefined' ? PointerEvent : MouseEvent;
+          el.dispatchEvent(new Ctor(type, isPointer ? pointerOpts : mouseOpts));
         } catch (e) { /* certains types peuvent ne pas exister selon le navigateur */ }
-      });
+      };
+
+      // Un vrai clic humain n'est jamais parfaitement synchrone : down, un
+      // court instant (le temps d'appuyer), puis up. Envoyer tout d'un coup
+      // en synchrone peut être ignoré par des composants qui écoutent des
+      // séquences temporisées (debounce, animation de pression du bouton).
+      dispatch('pointerdown', true);
+      dispatch('mousedown', false);
+      try { el.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+      await sleep(90);
+      dispatch('pointerup', true);
+      dispatch('mouseup', false);
+      await sleep(30);
+
+      // Filet de sécurité : el.click() déclenche un VRAI clic natif du
+      // navigateur (contrairement à dispatchEvent('click', ...) qui reste
+      // synthétique) — c'est ce que beaucoup de composants React attendent
+      // réellement pour ouvrir menus/modales.
+      try { el.click(); } catch (e) { dispatch('click', false); }
     }
 
     function setNativeValue(el, value) {
@@ -1517,31 +1845,108 @@
       mailish.forEach(el => console.log(`[DEBUG] <${el.tagName.toLowerCase()}> "${el.textContent.trim()}"`, el));
     }
 
+    // Clique sur un élément puis attend qu'une condition attendue devienne
+    // vraie (ex. un champ apparaît). Si ça ne marche pas rapidement — ce qui
+    // arrive avec certains boutons Crisp qui semblent ignorer les clics
+    // synthétiques — on redonne la main à l'utilisateur via une bannière lui
+    // demandant de cliquer lui-même, tout en continuant à surveiller en
+    // arrière-plan : dès que la condition devient vraie (clic manuel ou
+    // automatique), l'automatisation reprend toute seule.
+    async function ensureAfterClick(el, checkFn, manualLabel, quickTimeoutMs, totalTimeoutMs) {
+      await robustClick(el);
+      let result = await waitFor(checkFn, quickTimeoutMs).catch(() => null);
+      if (result) return result;
+
+      console.log(`[TousErgo/Crisp automation] Clic automatique sur "${manualLabel}" sans effet détecté après ${quickTimeoutMs}ms — passage en mode manuel assisté.`);
+      showCrispBanner(`Clique toi-même sur "${manualLabel}" — l'automatisation reprend automatiquement juste après.`, true);
+      result = await waitFor(checkFn, totalTimeoutMs);
+      showCrispBanner('Repris automatiquement...');
+      return result;
+    }
+
     async function runCrispAutomation(pending) {
       try {
+        // Réinitialise l'état de l'UI avant de démarrer : la page n'est
+        // jamais rechargée entre deux tentatives (SPA), donc un panneau
+        // resté ouvert d'un essai précédent peut faire que le prochain
+        // clic sur "Nouvelle conversation" le BASCULE (toggle → fermeture)
+        // au lieu de l'ouvrir franchement. On ferme tout ce qui traîne
+        // avant de commencer.
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', bubbles: true }));
+        try { document.body.click(); } catch (e) { /* ignore */ }
+        await new Promise(r => setTimeout(r, 300));
+
         showCrispBanner(`Ouverture d'une nouvelle conversation pour ${pending.email}...`);
+        // Le bouton "Nouvelle conversation" est un bouton 100% icône (SVG
+        // <use xlink:href="#icon-plus">), tooltip "Créer une conversation",
+        // classe "c-conversation-menu-header__button--new" confirmée sur le
+        // terrain. ⚠️ Il y a PLUSIEURS boutons "+" avec la même icône sur la
+        // page (ex. "Ajouter un filtre" dans la sidebar) — on cible donc en
+        // priorité la classe exacte de ce bouton.
         const newConvBtn = await waitFor(() =>
-          findByTextIncludes('button', 'Nouvelle conversation', 40) ||
-          findByTextIncludes('button, a, div[role="button"]', 'Nouvelle conversation', 60)
+          document.querySelector('button[class*="conversation-menu-header__button--new" i]:not([disabled])') ||
+          document.querySelector('[class*="conversation-menu-header__button--new" i]') ||
+          findByIconHref('icon-plus', 'conversation-menu-header') ||
+          findByTextIncludes('button, a, div[role="button"], span[role="button"], [aria-label]', 'Nouvelle conversation', 60) ||
+          findByTextIncludes('button, a, div[role="button"], span[role="button"], [aria-label]', 'nouveau message', 60) ||
+          findByTextIncludes('button, a, div[role="button"], span[role="button"], [aria-label]', 'compose', 60) ||
+          findByIconHref('icon-plus') // dernier recours : n'importe quel "+" visible, risque d'ambiguïté
         );
-        robustClick(newConvBtn);
+
+        // Ce bouton précis semble ignorer les clics synthétiques chez
+        // certains utilisateurs (protection anti-bot possible côté Crisp) —
+        // on tente le clic auto, et si le formulaire n'apparaît pas en 4s,
+        // on demande à Jimmy de cliquer lui-même sur le "+".
+        let emailInput = await ensureAfterClick(
+          newConvBtn,
+          () => findFieldByKeyword('e-?mail'),
+          'Créer une conversation (icône + en haut de la liste)',
+          4000,
+          60000
+        );
 
         showCrispBanner('Remplissage du formulaire client...');
         await debugDumpFormState();
-        const emailInput = await waitFor(() => findFieldByKeyword('e-?mail'));
         setNativeValue(emailInput, pending.email);
 
         const nameInput = await waitFor(() => findFieldByKeyword('nom', emailInput));
         setNativeValue(nameInput, pending.name || pending.email);
 
-        const createBtn = await waitFor(() => findByTextIncludes('button', 'Créer une conversation', 60));
-        robustClick(createBtn);
+        // Bouton de SOUMISSION du formulaire (dans le panneau) : bouton
+        // texte "Créer une conversation" (confirmé via inspection DOM, texte
+        // visible cette fois, pas dans un tooltip caché) — contrairement au
+        // bouton d'en-tête qui est une icône pure. On exclut quand même
+        // newConvBtn par précaution.
+        let createBtn;
+        try {
+          createBtn = await waitFor(() =>
+            findByTextIncludes('button, a, div[role="button"], [aria-label]', 'Créer une conversation', 60, newConvBtn) ||
+            findByIconHref('icon-plus_circle', undefined, newConvBtn) ||
+            findByIconHref('icon-plus', undefined, newConvBtn)
+          , 8000);
+        } catch (e) {
+          console.log('[TousErgo/Crisp automation][DEBUG] Bouton de soumission du formulaire introuvable — état au moment de l\'échec :');
+          debugDumpClickable();
+          debugDumpIcons();
+          throw e;
+        }
+
+        // Même logique manuel-assisté pour ce bouton : on attend l'apparition
+        // de la zone de saisie du message, preuve que la conversation a bien
+        // été créée.
+        const composer = await ensureAfterClick(
+          createBtn,
+          () => {
+            const el = document.querySelector('[contenteditable="true"]') || document.querySelector('textarea');
+            return isVisible(el) ? el : null;
+          },
+          'Créer une conversation (bouton bleu)',
+          4000,
+          60000
+        );
 
         showCrispBanner(`Conversation créée — sélection du raccourci "${pending.macroLabel}"...`);
-        const composer = await waitFor(() => {
-          const el = document.querySelector('[contenteditable="true"]') || document.querySelector('textarea');
-          return isVisible(el) ? el : null;
-        });
         composer.focus();
         document.execCommand('insertText', false, pending.macroLabel);
 
@@ -1553,10 +1958,13 @@
         ).catch(() => null);
 
         if (!suggestion) {
+          console.log('[TousErgo/Crisp automation][DEBUG] Raccourci non trouvé automatiquement — état des éléments cliquables au moment de l\'échec :');
+          debugDumpClickable();
+          debugDumpIcons();
           showCrispBanner(`Raccourci "${pending.macroLabel}" non trouvé automatiquement dans la liste — sélectionne-le toi-même, puis envoie.`, true);
           return;
         }
-        robustClick(suggestion);
+        await robustClick(suggestion);
 
         if (!CONFIG.crisp.autoSend) {
           showCrispBanner('Raccourci sélectionné — vérifie le message puis clique toi-même sur "Envoyer".');
@@ -1564,15 +1972,24 @@
         }
 
         showCrispBanner('Envoi en cours...');
-        const sendBtn = await waitFor(() => findByTextExact('button', 'Envoyer'));
-        robustClick(sendBtn);
+        const sendBtn = await waitFor(() =>
+          findByTextExact('button, a, div[role="button"], [aria-label]', 'Envoyer') ||
+          findByIconHref('icon-paper-plane') ||
+          findByIconHref('icon-send')
+        );
+        await robustClick(sendBtn);
         showCrispBanner(`Message envoyé à ${pending.email}.`);
 
       } catch (err) {
         console.error('[TousErgo/Crisp automation] Erreur', err);
+        console.log('[TousErgo/Crisp automation][DEBUG] État des éléments cliquables au moment de l\'échec (pour identifier le bon libellé/sélecteur) :');
+        debugDumpClickable();
+        debugDumpIcons();
         showCrispBanner(`Automatisation interrompue (${err.message}) — termine cette étape manuellement.`, true);
       }
     }
+
+
 
     function bootCrispAutomation() {
       const raw = GM_getValue('te_crisp_pending', null);
@@ -2741,5 +3158,945 @@
           if (closed) clearInterval(interval);
       }, 1000);
 
+  })();
+})();
+
+// ============================================================================
+// MODULE : 7. DEV - Levée de fiche téléphone (3CX -> recherche client PrestaShop)
+// Se déclenche uniquement si l'URL contient ?ldf_phone=... (paramètre ouvert
+// par la config "screen pop" de 3CX au décrochage d'un appel).
+// ============================================================================
+(function () {
+  'use strict';
+  // Garde de site : back-office PrestaShop uniquement. Le menu de config de
+  // la clé doit être dispo même sans paramètre ldf_phone dans l'URL —
+  // la recherche automatique, elle, ne se lance que si ldf_phone est présent.
+  // Fonctionne sur le back-office ET sur le site public (www.tousergo.com) —
+  // la levée de fiche 3CX peut désormais pointer vers le site public pour
+  // que l'agent garde le site client sous le panneau, réductible à tout moment.
+  if (location.hostname !== 'www.tousergo.com') return;
+  const ldfParams = new URLSearchParams(location.search);
+
+  (function () {
+    'use strict';
+
+    // ------------------------------------------------------------
+    // CONFIG — la clé Webservice n'est JAMAIS écrite en dur ici.
+    // Elle est saisie une fois via le menu Tampermonkey et stockée
+    // localement sur le poste (GM_setValue), jamais commitée sur GitHub.
+    // Clé recommandée : lecture seule, limitée aux ressources
+    // "addresses" et "customers".
+    // ------------------------------------------------------------
+    const PS_URL = 'https://www.tousergo.com';
+    const ODOO_URL = 'https://tousergo.eggs-solutions.fr';
+
+    // Toujours enregistré dès qu'on est sur une page admin PrestaShop,
+    // pour pouvoir configurer la clé avant même le premier appel 3CX.
+    GM_registerMenuCommand('Levée de fiche : configurer la clé Webservice PrestaShop', () => {
+      const current = GM_getValue('te_ldf_ws_key', '');
+      const key = prompt('Clé Webservice PrestaShop (lecture seule, ressources addresses/customers) :', current);
+      if (key !== null) GM_setValue('te_ldf_ws_key', key.trim());
+    });
+
+    function getWsKey() {
+      return GM_getValue('te_ldf_ws_key', '');
+    }
+
+    // ------------------------------------------------------------
+    // Identifiants Odoo — comme la clé PrestaShop, jamais écrits en dur.
+    // Chaque agent utilise SON PROPRE identifiant/mot de passe Odoo
+    // (celui qu'il utilise déjà pour se connecter à Odoo normalement),
+    // stocké uniquement en local sur son poste (GM_setValue).
+    // ------------------------------------------------------------
+    GM_registerMenuCommand('Levée de fiche : configurer mes identifiants Odoo', () => {
+      const currentLogin = GM_getValue('te_ldf_odoo_login', '');
+      const login = prompt('Identifiant Odoo (ton adresse email de connexion Odoo) :', currentLogin);
+      if (login === null) return;
+      const password = prompt('Mot de passe Odoo (stocké uniquement sur ce poste) :', '');
+      if (password === null) return;
+      const currentDb = GM_getValue('te_ldf_odoo_db', 'TOUSERGOS');
+      const db = prompt('Base de données Odoo :', currentDb);
+      if (db === null) return;
+      GM_setValue('te_ldf_odoo_login', login.trim());
+      GM_setValue('te_ldf_odoo_pwd', password);
+      GM_setValue('te_ldf_odoo_db', db.trim());
+      alert('Identifiants Odoo enregistrés sur ce poste.');
+    });
+
+    function getOdooCreds() {
+      return {
+        login: GM_getValue('te_ldf_odoo_login', ''),
+        pwd: GM_getValue('te_ldf_odoo_pwd', ''),
+        db: GM_getValue('te_ldf_odoo_db', 'TOUSERGOS'),
+      };
+    }
+
+    let odooSid = null; // session Odoo en cache pour la durée du chargement de page
+
+    // Authentification Odoo (JSON-RPC /web/session/authenticate), reprise
+    // du prototype SC 360 Dashboard. Le session_id est extrait du header
+    // Set-Cookie de la réponse (particularité Odoo déjà rencontrée sur ce
+    // projet lors du développement du dashboard SC 360).
+    function odooAuthenticate() {
+      return new Promise((resolve, reject) => {
+        const { login, pwd, db } = getOdooCreds();
+        if (!login || !pwd) {
+          reject(new Error('Identifiants Odoo non configurés (menu Tampermonkey -> Levée de fiche)'));
+          return;
+        }
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: `${ODOO_URL}/web/session/authenticate`,
+          headers: { 'Content-Type': 'application/json' },
+          data: JSON.stringify({
+            jsonrpc: '2.0', method: 'call',
+            params: { db: db, login: login, password: pwd },
+          }),
+          onload: (res) => {
+            try {
+              const data = JSON.parse(res.responseText);
+              if (data.error) {
+                reject(new Error(data.error.data?.message || 'Erreur authentification Odoo'));
+                return;
+              }
+              const headers = res.responseHeaders || '';
+              const match = headers.match(/session_id=([^;\r\n]+)/i);
+              if (match) {
+                odooSid = match[1];
+                resolve(odooSid);
+              } else if (data.result && data.result.session_id) {
+                odooSid = data.result.session_id;
+                resolve(odooSid);
+              } else {
+                reject(new Error('Session Odoo introuvable dans la réponse'));
+              }
+            } catch (e) {
+              reject(new Error('Réponse Odoo invalide : ' + e.message));
+            }
+          },
+          onerror: () => reject(new Error('Erreur réseau Odoo')),
+        });
+      });
+    }
+
+    // Recherche res.partner par téléphone (repris de searchOdoo du prototype)
+    // Recherche Odoo pour UN client précis : priorité à l'email exact
+    // (comme searchOdoo du prototype — domain = [['email','=',email]]),
+    // le téléphone n'est utilisé qu'en repli si le client n'a pas d'email.
+    // Ça évite de remonter tous les contacts Odoo qui partagent le même
+    // numéro (ex: numéro de test réutilisé sur plusieurs fiches).
+    function odooRunSearch(domain) {
+      console.log('[LeveeDeFiche][DEBUG-ODOO] Domain envoyé ->', JSON.stringify(domain));
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: `${ODOO_URL}/web/dataset/call_kw`,
+          headers: { 'Content-Type': 'application/json', Cookie: `session_id=${odooSid}` },
+          data: JSON.stringify({
+            jsonrpc: '2.0', method: 'call', id: 2,
+            params: {
+              model: 'res.partner', method: 'search_read', args: [domain],
+              kwargs: {
+                fields: ['id', 'name', 'phone', 'mobile', 'email', 'city', 'street', 'zip', 'company_name', 'parent_id'],
+                limit: 20, context: {},
+              },
+            },
+          }),
+          onload: (res) => {
+            try {
+              const data = JSON.parse(res.responseText);
+              if (data.error) {
+                // Session probablement expirée : on force une ré-authentification
+                // au prochain appel plutôt que de planter.
+                odooSid = null;
+                console.warn('[LeveeDeFiche][DEBUG-ODOO] Erreur Odoo :', JSON.stringify(data.error));
+                reject(new Error(data.error.data?.message || 'Erreur recherche Odoo'));
+                return;
+              }
+              console.log('[LeveeDeFiche][DEBUG-ODOO] Résultats reçus ->', JSON.stringify(data.result));
+              resolve(data.result || []);
+            } catch (e) {
+              reject(new Error('Réponse Odoo invalide : ' + e.message));
+            }
+          },
+          onerror: () => reject(new Error('Erreur réseau Odoo')),
+        });
+      });
+    }
+
+    function odooBuildDomain(email, phone, useEmail, usePhone) {
+      const domain = [];
+      if (useEmail) domain.push(['email', '=', email.trim()]);
+      if (usePhone) {
+        const variants = phoneVariants(phone || '');
+        const conds = variants.flatMap(v => [['phone', 'like', v], ['mobile', 'like', v]]);
+        for (let i = 0; i < conds.length - 1; i++) domain.push('|');
+        domain.push(...conds);
+      }
+      // On ne garde que le contact "général" (parent_id vide), pas les
+      // adresses/contacts enfants rattachés (facturation, livraison...)
+      // qui apparaissent comme des res.partner séparés dans Odoo.
+      domain.push(['parent_id', '=', false]);
+      return domain;
+    }
+
+    // Recherche en cascade, du plus précis au plus large :
+    // 1) email + téléphone combinés (isole la bonne fiche même si l'email
+    //    seul n'est pas unique dans les données, comme observé en test)
+    // 2) email seul en repli
+    // 3) téléphone seul en dernier repli
+    // Si plusieurs fiches Odoo partagent le même email (données de test en
+    // vrac, ou vraie homonymie), on affine avec le code postal déjà connu
+    // côté PrestaShop : s'il ne reste plus qu'une seule correspondance,
+    // c'est la bonne fiche.
+    function refineByPostcode(results, postcode) {
+      if (!postcode || results.length <= 1) return results;
+      const clean = String(postcode).trim();
+      const matches = results.filter(r => String(r.zip || '').trim() === clean);
+      return matches.length === 1 ? matches : results;
+    }
+
+    async function odooSearchByCustomer({ email, phone, postcode }) {
+      if (!odooSid) await odooAuthenticate();
+
+      if (email && phone) {
+        const strict = await odooRunSearch(odooBuildDomain(email, phone, true, true));
+        console.log('[LeveeDeFiche][DEBUG-ODOO] Étape email+téléphone :', strict.length, 'résultat(s)');
+        if (strict.length > 0) return refineByPostcode(strict, postcode);
+      }
+      if (email) {
+        const byEmail = await odooRunSearch(odooBuildDomain(email, phone, true, false));
+        console.log('[LeveeDeFiche][DEBUG-ODOO] Étape email seul :', byEmail.length, 'résultat(s)');
+        if (byEmail.length > 0) return refineByPostcode(byEmail, postcode);
+      }
+      if (phone) {
+        console.log('[LeveeDeFiche][DEBUG-ODOO] Étape téléphone seul (dernier repli)');
+        const byPhone = await odooRunSearch(odooBuildDomain(email, phone, false, true));
+        return refineByPostcode(byPhone, postcode);
+      }
+      return [];
+    }
+
+    // Retrouve la commande Odoo (sale.order) correspondant à une commande
+    // PrestaShop, via le champ personnalisé "eggs_ref_commande" qui stocke
+    // la référence PrestaShop (ex: "AZBGQGRSD") côté Odoo.
+    async function odooSearchOrderByRef(reference) {
+      if (!reference) return [];
+      if (!odooSid) await odooAuthenticate();
+
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: `${ODOO_URL}/web/dataset/call_kw`,
+          headers: { 'Content-Type': 'application/json', Cookie: `session_id=${odooSid}` },
+          data: JSON.stringify({
+            jsonrpc: '2.0', method: 'call', id: 2,
+            params: {
+              model: 'sale.order', method: 'search_read',
+              args: [[['eggs_ref_commande', '=', reference]]],
+              kwargs: { fields: ['id', 'name'], limit: 1, context: {} },
+            },
+          }),
+          onload: (res) => {
+            try {
+              const data = JSON.parse(res.responseText);
+              if (data.error) {
+                odooSid = null;
+                reject(new Error(data.error.data?.message || 'Erreur recherche commande Odoo'));
+                return;
+              }
+              resolve(data.result || []);
+            } catch (e) {
+              reject(new Error('Réponse Odoo invalide : ' + e.message));
+            }
+          },
+          onerror: () => reject(new Error('Erreur réseau Odoo')),
+        });
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Normalisation téléphone — repris du prototype SC 360 Dashboard
+    // (getCountryCode, toE164, getNationalSuffix, phonesMatchInternationally)
+    // ------------------------------------------------------------
+    function getCountryCode(phone) {
+      const clean = phone.replace(/[^\d+]/g, '');
+      if (clean.startsWith('+33') || clean.startsWith('0033')) return '33';
+      if (clean.startsWith('+32') || clean.startsWith('0032')) return '32';
+      if (clean.startsWith('+41') || clean.startsWith('0041')) return '41';
+      if (clean.startsWith('+352') || clean.startsWith('00352')) return '352';
+
+      const digits = phone.replace(/[^\d]/g, '');
+      if (digits.startsWith('33') && (digits.length === 11 || (digits.startsWith('330') && digits.length === 12))) return '33';
+      if (digits.startsWith('32') && (digits.length === 11 || digits.length === 10 || (digits.startsWith('320') && (digits.length === 12 || digits.length === 11)))) return '32';
+      if (digits.startsWith('41') && (digits.length === 11 || (digits.startsWith('410') && digits.length === 12))) return '41';
+      if (digits.startsWith('352') && digits.length >= 9 && digits.length <= 13) return '352';
+
+      if (digits.startsWith('0')) {
+        if (digits.length === 10 && /^0(45|46|47|48|49)/.test(digits)) return '32';
+        if (digits.length === 9) return '32';
+      }
+      return '33'; // défaut France
+    }
+
+    function toE164(p, defaultCountry) {
+      defaultCountry = defaultCountry || '33';
+      const digitsOnly = p.replace(/[^\d]/g, '');
+      const cleanWithPlus = p.replace(/[^\d+]/g, '');
+      if (cleanWithPlus.startsWith('+')) return cleanWithPlus;
+      if (cleanWithPlus.startsWith('00')) return '+' + cleanWithPlus.slice(2);
+
+      if (digitsOnly.startsWith('33') && (digitsOnly.length === 11 || (digitsOnly.startsWith('330') && digitsOnly.length === 12))) {
+        const nat = digitsOnly.startsWith('330') ? digitsOnly.slice(3) : digitsOnly.slice(2);
+        return '+33' + nat;
+      }
+      if (digitsOnly.startsWith('32') && (digitsOnly.length === 11 || digitsOnly.length === 10 || (digitsOnly.startsWith('320') && (digitsOnly.length === 12 || digitsOnly.length === 11)))) {
+        const nat = digitsOnly.startsWith('320') ? digitsOnly.slice(3) : digitsOnly.slice(2);
+        return '+32' + nat;
+      }
+      if (digitsOnly.startsWith('41') && (digitsOnly.length === 11 || (digitsOnly.startsWith('410') && digitsOnly.length === 12))) {
+        const nat = digitsOnly.startsWith('410') ? digitsOnly.slice(3) : digitsOnly.slice(2);
+        return '+41' + nat;
+      }
+      if (digitsOnly.startsWith('352') && digitsOnly.length >= 9 && digitsOnly.length <= 13) {
+        return '+352' + digitsOnly.slice(3);
+      }
+      if (digitsOnly.startsWith('0')) return '+' + defaultCountry + digitsOnly.slice(1);
+      return '+' + defaultCountry + digitsOnly;
+    }
+
+    function phonesMatchInternationally(searchPhone, resultPhone, defaultCountry) {
+      if (!resultPhone) return false;
+      const normSearch = toE164(searchPhone, defaultCountry);
+      const normResult = toE164(resultPhone, defaultCountry);
+      return normSearch === normResult;
+    }
+
+    function getNationalSuffix(phone) {
+      const clean = phone.replace(/[^\d]/g, '');
+      const countryCodes = ['33', '32', '41', '352', '49', '44', '31'];
+      for (const cc of countryCodes) {
+        if (clean.startsWith(cc) && clean.length > cc.length + 4) return clean.slice(cc.length);
+      }
+      if (clean.startsWith('00')) {
+        const w = clean.slice(2);
+        for (const cc of countryCodes) {
+          if (w.startsWith(cc) && w.length > cc.length + 4) return w.slice(cc.length);
+        }
+      }
+      if (clean.startsWith('0') && clean.length > 1) return clean.slice(1);
+      return clean;
+    }
+
+    // Génère les formats probables sous lesquels le numéro peut être stocké
+    // dans PrestaShop (avec/sans +33, avec/sans le 0 initial, avec/sans 00).
+    // Repris du prototype SC 360 Dashboard (phoneVariants).
+    function phoneVariants(p) {
+      const digits = p.replace(/[^\d]/g, '');
+      const variants = new Set();
+      if (digits) variants.add(digits);
+
+      // On s'appuie sur getCountryCode/getNationalSuffix (déjà robustes,
+      // fonctionnent uniquement à partir des chiffres) plutôt que de
+      // chercher un "+" littéral dans la chaîne : celui-ci est souvent
+      // perdu en cours de route (ex: un "+" dans une URL est interprété
+      // comme un espace par le navigateur avant même d'arriver ici).
+      const countryCode = getCountryCode(p);
+      const national = getNationalSuffix(p);
+
+      if (national.length >= 5) {
+        variants.add(national);
+        variants.add('0' + national);
+        variants.add('+' + countryCode + national);
+        variants.add('00' + countryCode + national);
+      }
+
+      return Array.from(variants);
+    }
+
+    // ------------------------------------------------------------
+    // Appel Webservice PrestaShop via GM_xmlhttpRequest (contourne CORS,
+    // la clé ne quitte jamais le poste de l'agent)
+    // ------------------------------------------------------------
+    function psGet(endpoint) {
+      return new Promise((resolve, reject) => {
+        const key = getWsKey();
+        if (!key) {
+          reject(new Error('Clé Webservice non configurée (menu Tampermonkey -> Levée de fiche)'));
+          return;
+        }
+        const sep = endpoint.includes('?') ? '&' : '?';
+        const url = `${PS_URL}/api/${endpoint}${sep}ws_key=${key}`;
+        console.log('[LeveeDeFiche][DEBUG] Requête ->', url.replace(key, '***CLE***'));
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url: url,
+          headers: { Accept: 'application/json' },
+          onload: (res) => {
+            console.log('[LeveeDeFiche][DEBUG] Statut HTTP :', res.status);
+            console.log('[LeveeDeFiche][DEBUG] Réponse brute :', res.responseText);
+            try {
+              const data = JSON.parse(res.responseText);
+              if (data && data.errors) {
+                console.warn('[LeveeDeFiche][DEBUG] PrestaShop a renvoyé une erreur :', JSON.stringify(data.errors));
+                resolve(null);
+                return;
+              }
+              resolve(data);
+            } catch (e) {
+              console.error('[LeveeDeFiche][DEBUG] Réponse non-JSON (probablement une page HTML d\'erreur/login) :', e.message);
+              resolve(null);
+            }
+          },
+          onerror: (err) => {
+            console.error('[LeveeDeFiche][DEBUG] Erreur réseau brute :', err);
+            reject(new Error('Erreur réseau PrestaShop'));
+          },
+        });
+      });
+    }
+
+    // Construit une liste OR de valeurs exactes façon PrestaShop :
+    // filter[phone]=[valeur1|valeur2|valeur3] — syntaxe confirmée
+    // fonctionnelle (contrairement au LIKE %...% qui ne matche rien ici).
+    function buildExactOrList(variants) {
+      return '[' + variants.map(v => encodeURIComponent(v)).join('|') + ']';
+    }
+
+    // Cache des noms de groupe client (évite de répéter l'appel API pour
+    // chaque client trouvé s'ils partagent le même groupe).
+    const groupNameCache = new Map();
+    async function psGetGroupName(groupId) {
+      if (!groupId) return '';
+      if (groupNameCache.has(groupId)) return groupNameCache.get(groupId);
+      try {
+        const gData = await psGet(`groups/${groupId}?display=[name]&output_format=JSON`);
+        const raw = gData?.group?.name ?? gData?.groups?.[0]?.name;
+        let name = '';
+        if (Array.isArray(raw)) name = raw.find(l => String(l.id) === '1')?.value || raw[0]?.value || '';
+        else if (typeof raw === 'string') name = raw;
+        groupNameCache.set(groupId, name);
+        return name;
+      } catch (e) {
+        return '';
+      }
+    }
+
+    // Cache des noms d'état de commande (ex: "Livré", "En attente de paiement")
+    const orderStateCache = new Map();
+    async function psGetOrderStateName(stateId) {
+      if (!stateId) return '';
+      if (orderStateCache.has(stateId)) return orderStateCache.get(stateId);
+      try {
+        const sData = await psGet(`order_states/${stateId}?display=[name]&output_format=JSON`);
+        const raw = sData?.order_state?.name;
+        let name = '';
+        if (Array.isArray(raw)) name = raw.find(l => String(l.id) === '1')?.value || raw[0]?.value || '';
+        else if (typeof raw === 'string') name = raw;
+        orderStateCache.set(stateId, name);
+        return name;
+      } catch (e) {
+        return '';
+      }
+    }
+
+    // Dernières commandes d'un client (3 max, les plus récentes)
+    async function psGetLastOrders(customerId) {
+      try {
+        const data = await psGet(
+          `orders?filter[id_customer]=${customerId}&sort=[id_DESC]&limit=3&display=[id,reference,total_paid,date_add,current_state]&output_format=JSON`
+        );
+        const orders = data?.orders || [];
+        // Résolution des noms de statut en parallèle plutôt qu'un par un.
+        await Promise.all(orders.map(async (o) => {
+          o.stateName = await psGetOrderStateName(o.current_state);
+        }));
+        return orders;
+      } catch (e) {
+        console.error(`[LeveeDeFiche] Erreur commandes client ${customerId}:`, e);
+        return [];
+      }
+    }
+
+    // Recherche RAPIDE : nom, email, adresse — tout ce qu'il faut pour
+    // afficher la carte immédiatement. Le groupe/encours détaillé et les
+    // commandes sont récupérés séparément ensuite (psEnrichCustomer), pour
+    // ne jamais retarder le premier affichage.
+    async function psSearchByPhone(phone) {
+      const variants = phoneVariants(phone);
+      if (variants.length === 0) return [];
+
+      const orList = buildExactOrList(variants);
+      const addressesByCustomer = new Map();
+
+      try {
+        // Les deux recherches (phone / phone_mobile) en parallèle.
+        const [resPhone, resMobile] = await Promise.all([
+          psGet(`addresses?filter[phone]=${orList}&display=full&output_format=JSON`),
+          psGet(`addresses?filter[phone_mobile]=${orList}&display=full&output_format=JSON`),
+        ]);
+        const addrs = [...(resPhone?.addresses || []), ...(resMobile?.addresses || [])];
+        const searchCountry = getCountryCode(phone);
+
+        for (const addr of addrs) {
+          if (addr.id_customer && addr.id_customer !== '0') {
+            const p1 = addr.phone ? String(addr.phone) : '';
+            const p2 = addr.phone_mobile ? String(addr.phone_mobile) : '';
+            if (phonesMatchInternationally(phone, p1, searchCountry) ||
+                phonesMatchInternationally(phone, p2, searchCountry)) {
+              const cid = String(addr.id_customer);
+              const list = addressesByCustomer.get(cid) || [];
+              list.push({
+                company: addr.company || '',
+                address1: addr.address1 || '',
+                postcode: addr.postcode || '',
+                city: addr.city || '',
+                phone: addr.phone || addr.phone_mobile || '',
+              });
+              addressesByCustomer.set(cid, list);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[LeveeDeFiche] Erreur recherche adresses PrestaShop:', e);
+      }
+
+      // Toutes les fiches client récupérées en parallèle plutôt qu'une par une.
+      const ids = Array.from(addressesByCustomer.keys());
+      const results = await Promise.all(ids.map(async (cid) => {
+        try {
+          const cData = await psGet(`customers/${cid}?output_format=JSON`);
+          // Selon les cas, PrestaShop répond soit {"customer": {...}} (singulier),
+          // soit {"customers": [{...}]} (pluriel, un seul élément) — on gère les deux.
+          const c = cData?.customer || (Array.isArray(cData?.customers) ? cData.customers[0] : null);
+          if (!c) {
+            console.warn(`[LeveeDeFiche] Réponse client ${cid} inattendue :`, cData);
+            return null;
+          }
+          c.id = cid;
+          const addresses = addressesByCustomer.get(cid);
+          // Adresse principale : en priorité celle avec une société renseignée.
+          addresses.sort((a, b) => (b.company ? 1 : 0) - (a.company ? 1 : 0));
+          c.addressInfo = addresses[0];
+          c.otherAddresses = addresses.slice(1);
+          c.outstanding = c.associations?.customers_extra?.[0]?.outstanding || 0;
+          c.enriched = false; // groupe + commandes pas encore chargés
+          return c;
+        } catch (e) {
+          console.error(`[LeveeDeFiche] Erreur fiche client ${cid}:`, e);
+          return null;
+        }
+      }));
+      return results.filter(Boolean);
+    }
+
+    // Enrichissement DIFFÉRÉ (groupe + dernières commandes), appelé après
+    // le premier affichage pour ne jamais bloquer la carte initiale.
+    async function psEnrichCustomer(c) {
+      const [groupName, orders] = await Promise.all([
+        psGetGroupName(c.id_default_group),
+        psGetLastOrders(c.id),
+      ]);
+      c.groupName = groupName;
+      c.orders = orders;
+      c.enriched = true;
+      return c;
+    }
+
+    // ------------------------------------------------------------
+    // Panneau flottant d'affichage résultat
+    // ------------------------------------------------------------
+    function ensurePanelStyles() {
+      if (document.getElementById('te-ldf-style')) return;
+      const style = document.createElement('style');
+      style.id = 'te-ldf-style';
+      style.textContent = `
+        #te-ldf-panel { position:fixed; top:16px; right:16px; width:360px; max-height:88vh;
+          z-index:2147483647; background:#fff; color:#1a1e2a; border-radius:12px;
+          font-family:-apple-system,'Segoe UI',sans-serif; font-size:13px;
+          box-shadow:0 24px 60px -12px rgba(0,0,0,.45); display:flex; flex-direction:column;
+          overflow:hidden; border:1px solid #e2e5ea; transition:width .15s,height .15s; }
+        #te-ldf-panel.te-ldf-min { width:auto; max-height:none; }
+        #te-ldf-panel.te-ldf-min .te-ldf-body { display:none; }
+        #te-ldf-panel.te-ldf-expanded { top:5vh; right:5vw; left:5vw; width:auto; max-height:90vh; }
+        #te-ldf-backdrop { position:fixed; inset:0; background:rgba(10,12,20,.35); z-index:2147483646; }
+        #te-ldf-panel .te-ldf-head { background:#1e2540; color:#fff; padding:12px 16px;
+          display:flex; justify-content:space-between; align-items:center; flex-shrink:0; gap:10px; }
+        #te-ldf-panel .te-ldf-head b { font-size:13px; white-space:nowrap; }
+        #te-ldf-panel .te-ldf-head small { display:block; color:#9aa3c2; font-size:11px; margin-top:2px; }
+        #te-ldf-panel .te-ldf-head-btns { display:flex; gap:4px; flex-shrink:0; }
+        #te-ldf-panel .te-ldf-iconbtn { cursor:pointer; color:#9aa3c2; font-size:14px; line-height:1;
+          background:none; border:none; padding:5px 7px; border-radius:5px; }
+        #te-ldf-panel .te-ldf-iconbtn:hover { color:#fff; background:rgba(255,255,255,.08); }
+        #te-ldf-panel .te-ldf-body { overflow-y:auto; padding:10px; }
+        #te-ldf-panel.te-ldf-expanded .te-ldf-body { display:grid;
+          grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; align-content:start; }
+        #te-ldf-panel .te-ldf-msg { padding:10px 6px; color:#5a6072; }
+        #te-ldf-panel .te-ldf-card { border:1px solid #e2e5ea; border-radius:10px; padding:12px;
+          margin-bottom:10px; }
+        #te-ldf-panel.te-ldf-expanded .te-ldf-card { margin-bottom:0; }
+        #te-ldf-panel .te-ldf-card:last-child { margin-bottom:0; }
+        #te-ldf-panel .te-ldf-name { font-weight:700; font-size:14px; }
+        #te-ldf-panel .te-ldf-badge { display:inline-block; background:#fdeee7; color:#c1502e;
+          font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:20px; margin-left:6px; }
+        #te-ldf-panel .te-ldf-row { color:#5a6072; font-size:12px; margin-top:4px; display:flex; gap:6px; }
+        #te-ldf-panel .te-ldf-row b { color:#1a1e2a; font-weight:600; }
+        #te-ldf-panel .te-ldf-actions { display:flex; gap:6px; margin-top:10px; }
+        #te-ldf-panel .te-ldf-btn { flex:1; text-align:center; padding:7px 0; border-radius:7px;
+          font-size:12px; font-weight:600; text-decoration:none; cursor:pointer; border:none; }
+        #te-ldf-panel .te-ldf-btn-ps { background:#DF0067; color:#fff; }
+        #te-ldf-panel .te-ldf-btn-odoo { background:#714B67; color:#fff; }
+        #te-ldf-panel .te-ldf-btn[disabled] { opacity:.6; cursor:default; }
+        #te-ldf-panel .te-ldf-odoo-item { display:flex; justify-content:space-between; gap:8px;
+          font-size:11.5px; color:#5a6072; padding:4px 0; border-top:1px solid #f1f2f5; }
+        #te-ldf-panel .te-ldf-odoo-item a { color:#1e2540; font-weight:600; text-decoration:none; flex-shrink:0; }
+        #te-ldf-panel .te-ldf-details { margin-top:8px; font-size:12px; }
+        #te-ldf-panel .te-ldf-details summary { cursor:pointer; color:#c1502e; font-weight:600; font-size:12px; }
+        #te-ldf-panel .te-ldf-subrow { color:#5a6072; padding:4px 0 4px 4px; border-top:1px solid #f1f2f5; }
+        #te-ldf-panel .te-ldf-order { display:flex; justify-content:space-between; align-items:center; gap:8px;
+          font-size:12px; color:#5a6072; padding:4px 0; }
+        #te-ldf-panel .te-ldf-order-info { display:flex; flex-direction:column; gap:1px; min-width:0; }
+        #te-ldf-panel .te-ldf-order-meta { color:#8a90a0; font-size:11px; }
+        #te-ldf-panel .te-ldf-order-icons { display:flex; gap:4px; flex-shrink:0; }
+        #te-ldf-panel .te-ldf-loading { font-size:11px; color:#a5abb5; font-style:italic; margin-top:6px; }
+        #te-ldf-panel .te-ldf-icon-btn { display:inline-flex; align-items:center; justify-content:center;
+          width:22px; height:22px; border-radius:6px; font-size:11px; font-weight:700; text-decoration:none;
+          cursor:pointer; border:none; line-height:1; }
+        #te-ldf-panel .te-ldf-icon-ps { background:#fbe4ef; color:#DF0067; }
+        #te-ldf-panel .te-ldf-icon-ps:hover { background:#DF0067; color:#fff; }
+        #te-ldf-panel .te-ldf-icon-odoo { background:#ece3e8; color:#714B67; }
+        #te-ldf-panel .te-ldf-icon-odoo:hover { background:#714B67; color:#fff; }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function setPanelState(panel, state) {
+      panel.classList.remove('te-ldf-min', 'te-ldf-expanded');
+      let backdrop = document.getElementById('te-ldf-backdrop');
+      if (state === 'min') {
+        panel.classList.add('te-ldf-min');
+        if (backdrop) backdrop.remove();
+      } else if (state === 'expanded') {
+        panel.classList.add('te-ldf-expanded');
+        if (!backdrop) {
+          backdrop = document.createElement('div');
+          backdrop.id = 'te-ldf-backdrop';
+          document.body.insertBefore(backdrop, panel);
+          backdrop.addEventListener('click', () => setPanelState(panel, 'normal'));
+        }
+      } else if (backdrop) {
+        backdrop.remove();
+      }
+      panel.dataset.state = state;
+    }
+
+    function renderPanel(bodyHtml, headerSubtitle, initialState) {
+      ensurePanelStyles();
+      let panel = document.getElementById('te-ldf-panel');
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'te-ldf-panel';
+        panel.innerHTML = `
+          <div class="te-ldf-head">
+            <div><b>Levée de fiche</b><small id="te-ldf-subtitle"></small></div>
+            <div class="te-ldf-head-btns">
+              <button class="te-ldf-iconbtn" data-action="min" type="button" title="Réduire / restaurer">—</button>
+              <button class="te-ldf-iconbtn" data-action="expand" type="button" title="Vue tableau de bord">⛶</button>
+              <button class="te-ldf-iconbtn" data-action="close" type="button" title="Fermer">✕</button>
+            </div>
+          </div>
+          <div class="te-ldf-body" id="te-ldf-body"></div>`;
+        document.body.appendChild(panel);
+        setPanelState(panel, initialState || 'normal');
+
+        function persistState(state) {
+          const session = loadLdfSession();
+          if (session) { session.panelState = state; saveLdfSession(session); }
+        }
+
+        panel.querySelector('[data-action="close"]').addEventListener('click', () => {
+          const backdrop = document.getElementById('te-ldf-backdrop');
+          if (backdrop) backdrop.remove();
+          panel.remove();
+          clearLdfSession(); // Fin de la levée de fiche : ne réapparaît plus sur les pages suivantes.
+        });
+        panel.querySelector('[data-action="min"]').addEventListener('click', () => {
+          const next = panel.dataset.state === 'min' ? 'normal' : 'min';
+          setPanelState(panel, next);
+          persistState(next);
+        });
+        panel.querySelector('[data-action="expand"]').addEventListener('click', () => {
+          const next = panel.dataset.state === 'expanded' ? 'normal' : 'expanded';
+          setPanelState(panel, next);
+          persistState(next);
+        });
+        // Double-clic sur l'en-tête = raccourci pour réduire/restaurer
+        panel.querySelector('.te-ldf-head').addEventListener('dblclick', (e) => {
+          if (e.target.closest('.te-ldf-iconbtn')) return;
+          const next = panel.dataset.state === 'min' ? 'normal' : 'min';
+          setPanelState(panel, next);
+          persistState(next);
+        });
+      }
+      panel.querySelector('#te-ldf-subtitle').textContent = headerSubtitle || '';
+      panel.querySelector('#te-ldf-body').innerHTML = bodyHtml;
+
+      // Câblage des boutons Odoo : recherche res.partner par EMAIL exact
+      // (comme le prototype), le téléphone n'est qu'un repli. Ça retrouve
+      // le contact Odoo du même client précis, pas tous les contacts qui
+      // partagent le même numéro.
+      panel.querySelectorAll('.te-ldf-btn-odoo').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const email = btn.getAttribute('data-email') || '';
+          const phone = btn.getAttribute('data-phone') || '';
+          const postcode = btn.getAttribute('data-postcode') || '';
+          const originalText = btn.textContent;
+          btn.textContent = 'Recherche Odoo…';
+          btn.disabled = true;
+          try {
+            const results = await odooSearchByCustomer({ email, phone, postcode });
+            if (results.length === 0) {
+              btn.textContent = 'Aucune fiche Odoo';
+              setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1800);
+            } else if (results.length === 1) {
+              window.open(`${ODOO_URL}/web#id=${results[0].id}&model=res.partner&view_type=form`, '_blank');
+              btn.textContent = originalText; btn.disabled = false;
+            } else {
+              // Plusieurs fiches Odoo possibles : affichées juste en dessous
+              // du bouton, chacune avec son propre lien fiable vers sa fiche.
+              let list = btn.parentElement.querySelector('.te-ldf-odoo-results');
+              if (!list) {
+                list = document.createElement('div');
+                list.className = 'te-ldf-odoo-results';
+                btn.parentElement.after(list);
+              }
+              list.innerHTML = `<div class="te-ldf-row" style="margin-top:8px;"><b>${results.length} fiches Odoo :</b></div>` +
+                results.map(r => `
+                  <div class="te-ldf-odoo-item">
+                    <span>${r.name || ''}${r.company_name ? ` — ${r.company_name}` : ''}</span>
+                    <a href="${ODOO_URL}/web#id=${r.id}&model=res.partner&view_type=form" target="_blank">Ouvrir →</a>
+                  </div>`).join('');
+              btn.textContent = originalText; btn.disabled = false;
+            }
+          } catch (e) {
+            console.error('[LeveeDeFiche] Erreur recherche Odoo:', e);
+            btn.textContent = 'Erreur Odoo';
+            setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1800);
+          }
+        });
+      });
+
+      // Câblage des boutons Odoo par commande : recherche sale.order via
+      // le champ eggs_ref_commande (référence PrestaShop), puis ouverture
+      // directe de la commande Odoo trouvée.
+      wireOdooOrderButtons(panel);
+    }
+
+    // Câblage des boutons "O" (commande -> recherche Odoo par référence).
+    // Fonction séparée car ces boutons peuvent être injectés après coup
+    // (enrichissement en arrière-plan), pas seulement au premier rendu.
+    function wireOdooOrderButtons(root) {
+      root.querySelectorAll('.te-ldf-icon-odoo').forEach((btn) => {
+        if (btn.dataset.wired) return; // évite de brancher deux fois le même bouton
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => {
+          const reference = btn.getAttribute('data-reference') || '';
+          if (!reference) return;
+          window.open(`${ODOO_URL}/order?search=${encodeURIComponent(reference)}`, '_blank');
+        });
+      });
+    }
+
+    function formatMoney(v) {
+      const n = parseFloat(v);
+      if (isNaN(n)) return '';
+      return n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    }
+    function formatDate(d) {
+      if (!d) return '';
+      return String(d).slice(0, 10).split('-').reverse().join('/');
+    }
+
+    function otherAddressesHtml(addresses) {
+      if (!addresses || addresses.length === 0) return '';
+      const items = addresses.map(a => {
+        const line = [a.address1, [a.postcode, a.city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+        return `<div class="te-ldf-subrow">${a.company ? `<b>${a.company}</b> — ` : ''}${line}${a.phone ? ` (${a.phone})` : ''}</div>`;
+      }).join('');
+      return `<details class="te-ldf-details">
+        <summary>Autres adresses (${addresses.length})</summary>
+        ${items}
+      </details>`;
+    }
+
+    function ordersHtml(orders) {
+      if (!orders || orders.length === 0) {
+        return `<div class="te-ldf-row" style="margin-top:8px;"><b>Dernières commandes :</b> aucune</div>`;
+      }
+      const items = orders.map(o => {
+        const orderLink = `${PS_URL}/admin_ps_t_fr/index.php?controller=AdminOrders&id_order=${o.id}&vieworder=1`;
+        const ref = (o.reference || '').replace(/"/g, '&quot;');
+        return `
+        <div class="te-ldf-order">
+          <div class="te-ldf-order-info">
+            <span>#${o.reference || o.id} — ${formatDate(o.date_add)}</span>
+            <span class="te-ldf-order-meta">${formatMoney(o.total_paid)}${o.stateName ? ` · ${o.stateName}` : ''}</span>
+          </div>
+          <div class="te-ldf-order-icons">
+            <a href="${orderLink}" target="_blank" class="te-ldf-icon-btn te-ldf-icon-ps" title="Ouvrir dans PrestaShop">P</a>
+            <button type="button" class="te-ldf-icon-btn te-ldf-icon-odoo" data-reference="${ref}" title="Ouvrir dans Odoo">O</button>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="te-ldf-row" style="margin-top:8px;"><b>Dernières commandes :</b></div>${items}`;
+    }
+
+
+    function extraDetailsHtml(c) {
+      const outstanding = parseFloat(c.outstanding) || 0;
+      return `
+        ${c.groupName ? `<div class="te-ldf-row"><b>Groupe :</b> ${c.groupName}</div>` : ''}
+        ${outstanding > 0 ? `<div class="te-ldf-row"><b>Encours :</b> ${formatMoney(outstanding)}</div>` : ''}
+        ${otherAddressesHtml(c.otherAddresses)}
+        ${ordersHtml(c.orders)}`;
+    }
+
+    function customerCard(c, searchedPhone) {
+      const psLink = `${PS_URL}/admin_ps_t_fr/index.php?controller=AdminCustomers&id_customer=${c.id}&viewcustomer`;
+      const info = c.addressInfo || {};
+      const company = info.company || c.company || '';
+      const addressLine = [info.address1, [info.postcode, info.city].filter(Boolean).join(' ')]
+        .filter(Boolean).join(', ');
+      // Si déjà enrichi (ex: restauré depuis le cache), on affiche direct.
+      // Sinon un petit texte, remplacé dès que psEnrichCustomer a fini.
+      const extraContent = c.enriched
+        ? extraDetailsHtml(c)
+        : `<div class="te-ldf-loading">Chargement du groupe et des commandes…</div>`;
+      return `<div class="te-ldf-card">
+        <div class="te-ldf-name">${c.firstname || ''} ${c.lastname || ''}<span class="te-ldf-badge">#${c.id}</span></div>
+        ${company ? `<div class="te-ldf-row"><b>Société :</b> ${company}</div>` : ''}
+        ${c.email ? `<div class="te-ldf-row"><b>Email :</b> ${c.email}</div>` : ''}
+        ${info.phone ? `<div class="te-ldf-row"><b>Tél :</b> ${info.phone}</div>` : ''}
+        ${addressLine ? `<div class="te-ldf-row"><b>Adresse :</b> ${addressLine}</div>` : ''}
+        <div class="te-ldf-extra" data-customer-id="${c.id}">${extraContent}</div>
+        <div class="te-ldf-actions">
+          <a class="te-ldf-btn te-ldf-btn-ps" href="${psLink}" target="_blank">Ouvrir PrestaShop</a>
+          <button class="te-ldf-btn te-ldf-btn-odoo" type="button"
+            data-email="${(c.email || '').replace(/"/g, '&quot;')}"
+            data-phone="${(info.phone || searchedPhone || '').replace(/"/g, '&quot;')}"
+            data-postcode="${(info.postcode || '').replace(/"/g, '&quot;')}">Ouvrir Odoo</button>
+        </div>
+      </div>`;
+    }
+
+    // ------------------------------------------------------------
+    // Persistance pendant la navigation (sessionStorage = survit aux
+    // changements de page dans le même onglet, disparaît si l'onglet
+    // se ferme — ne se mélange pas entre plusieurs onglets/agents).
+    // ------------------------------------------------------------
+    const LDF_SESSION_KEY = 'te_ldf_session_v1';
+
+    function saveLdfSession(data) {
+      try { sessionStorage.setItem(LDF_SESSION_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+    }
+    function loadLdfSession() {
+      try {
+        const raw = sessionStorage.getItem(LDF_SESSION_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    }
+    function clearLdfSession() {
+      try { sessionStorage.removeItem(LDF_SESSION_KEY); } catch (e) { /* ignore */ }
+    }
+
+    // Enrichit chaque client en arrière-plan (groupe + commandes) et met à
+    // jour sa carte + le cache dès que c'est prêt, sans bloquer l'affichage
+    // initial déjà à l'écran.
+    function enrichAndPatchAll(customers) {
+      customers.filter(c => !c.enriched).forEach(async (c) => {
+        try {
+          await psEnrichCustomer(c);
+          const el = document.querySelector(`.te-ldf-extra[data-customer-id="${c.id}"]`);
+          if (el) {
+            el.innerHTML = extraDetailsHtml(c);
+            wireOdooOrderButtons(el);
+          }
+          const session = loadLdfSession();
+          if (session && session.customers) {
+            const idx = session.customers.findIndex(x => String(x.id) === String(c.id));
+            if (idx !== -1) session.customers[idx] = c;
+            saveLdfSession(session);
+          }
+        } catch (e) {
+          console.error('[LeveeDeFiche] Erreur enrichissement client', c.id, e);
+        }
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Point d'entrée : lit ?ldf_phone=... dans l'URL (nouvelle levée de
+    // fiche 3CX) ou restaure la session active depuis sessionStorage
+    // (l'agent a juste navigué vers une autre page du site).
+    // ------------------------------------------------------------
+    async function initLeveeDeFiche() {
+      // Note : un "+" littéral dans l'URL (ex: ?ldf_phone=+33676589181) est
+      // décodé en espace par URLSearchParams — on le retire simplement,
+      // les fonctions de normalisation ci-dessous n'ont pas besoin du "+"
+      // pour détecter l'indicatif (elles travaillent sur les chiffres).
+      const urlPhone = (ldfParams.get('ldf_phone') || '').trim();
+      const existingSession = loadLdfSession();
+
+      let phone;
+      let cachedCustomers = null;
+
+      if (urlPhone) {
+        // Nouvel appel 3CX : on démarre une session fraîche, même si une
+        // ancienne était encore active (nouvel appel = nouvelle fiche).
+        phone = urlPhone;
+        saveLdfSession({ phone, customers: null, panelState: 'normal' });
+      } else if (existingSession && existingSession.phone) {
+        // Pas de paramètre dans l'URL : on est juste sur une nouvelle page
+        // du site pendant que la levée de fiche précédente est toujours active.
+        phone = existingSession.phone;
+        cachedCustomers = existingSession.customers;
+      } else {
+        return; // Rien à afficher.
+      }
+
+      const savedState = (loadLdfSession() || {}).panelState || 'normal';
+
+      if (cachedCustomers) {
+        // Ré-affichage instantané depuis le cache, sans re-solliciter les API.
+        renderPanel(renderCustomersHtml(cachedCustomers, phone), phone, savedState);
+        // Au cas où l'enrichissement n'avait pas fini avant la navigation précédente.
+        enrichAndPatchAll(cachedCustomers);
+        return;
+      }
+
+      renderPanel('<div class="te-ldf-msg">Recherche en cours…</div>', phone, savedState);
+
+      try {
+        const customers = await psSearchByPhone(phone);
+        renderPanel(renderCustomersHtml(customers, phone), phone, savedState);
+        const session = loadLdfSession() || { phone, panelState: savedState };
+        session.customers = customers;
+        saveLdfSession(session);
+        enrichAndPatchAll(customers); // en tâche de fond, n'attend pas
+      } catch (e) {
+        renderPanel(`<div class="te-ldf-msg" style="color:#c1502e;">Erreur : ${e.message}</div>`, phone, savedState);
+      }
+    }
+
+    function renderCustomersHtml(customers, phone) {
+      if (customers.length === 0) {
+        return `<div class="te-ldf-msg">Aucun client trouvé pour ${phone}.</div>`;
+      } else if (customers.length === 1) {
+        return customerCard(customers[0], phone);
+      }
+      return `<div class="te-ldf-msg">${customers.length} clients possibles :</div>` +
+        customers.map(c => customerCard(c, phone)).join('');
+    }
+
+    initLeveeDeFiche();
   })();
 })();
