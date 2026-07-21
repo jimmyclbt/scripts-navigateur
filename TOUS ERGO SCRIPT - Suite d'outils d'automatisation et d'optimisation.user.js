@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO SCRIPT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      1.2
+// @version      1.3
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, automatisation Crisp, boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX).
 // @match        https://www.tousergo.com/*
@@ -19,6 +19,8 @@
 // @grant        GM_deleteValue
 // @grant        GM_closeTab
 // @grant        GM_registerMenuCommand
+// @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
+// @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
 // @run-at       document-idle
 // ==/UserScript==
 
