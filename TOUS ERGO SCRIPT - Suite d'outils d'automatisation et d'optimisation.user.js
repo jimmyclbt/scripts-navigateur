@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      2.3
+// @version      2.4
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4987,10 +4987,16 @@ https://www.tousergo.com`,
       // (= date d'envoi du colis), pas la date de livraison réelle confirmée
       // par le transporteur. Utilisé seulement en repli quand le suivi
       // transporteur n'a pas pu être lu (transporteur non pris en charge,
-      // erreur réseau...).
+      // erreur réseau, ou vérification anti-robot non résolue — dans ce
+      // dernier cas, ouvrir "Voir le suivi colis" une fois dans un vrai
+      // onglet résout généralement le blocage, puis "Réessayer" suffit).
+      const carrierSupported = picking && picking.carrier_tracking_url &&
+        /chronopost|laposte\.fr|colissimo|gls|kuehne-nagel/i.test(picking.carrier_tracking_url);
       deliveryHtml = `🚚 Expédiée le <strong>${fmtDate(order.effective_date)}</strong>` +
         (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis l'expédition` : '') +
-        `<span class="te-rt-hint">Date d'envoi du colis — voir le suivi ci-dessous pour la date de livraison réelle</span>`;
+        `<span class="te-rt-hint">Date d'envoi du colis — voir le suivi ci-dessous pour la date de livraison réelle` +
+        (carrierSupported ? ` · <a href="#" class="te-rt-retry">🔄 Réessayer le suivi</a>` : '') +
+        `</span>`;
     } else if (picking) {
       deliveryHtml = `🚚 Pas encore expédiée (statut du colis : ${escapeHtml(picking.state)})`;
     } else {
@@ -5082,6 +5088,7 @@ https://www.tousergo.com`,
       #${PANEL_ID} .te-rt-section:first-child { margin-top:0; }
       #${PANEL_ID} .te-rt-warn { color:#856404; }
       #${PANEL_ID} .te-rt-hint { display:block; font-size:11px; color:#888; margin-top:2px; }
+      #${PANEL_ID} .te-rt-retry { color:#714B67; text-decoration:underline; }
       #${PANEL_ID} .te-rt-track-btn { display:inline-block; padding:3px 10px; background:#714B67;
         color:#fff; border-radius:4px; text-decoration:none; font-size:12px; }
       #${PANEL_ID} .te-rt-track-ref { font-size:12px; color:#555; }
@@ -5178,6 +5185,17 @@ https://www.tousergo.com`,
       <div class="te-rt-body" id="te-rt-body"></div>
     `;
     document.body.appendChild(panel);
+
+    // Clic sur "Réessayer le suivi" (délégation, car le contenu du corps est
+    // régénéré à chaque rafraîchissement) : relance simplement un rendu
+    // complet du retour actuellement affiché.
+    panel.querySelector('#te-rt-body').addEventListener('click', (e) => {
+      const retryLink = e.target.closest('.te-rt-retry');
+      if (!retryLink) return;
+      e.preventDefault();
+      const id = getRetourIdFromHash();
+      if (id) renderPanel(id);
+    });
 
     // Repositionnement à l'endroit laissé par le dernier glisser-déposer,
     // sinon position par défaut (haut à droite) définie en CSS.
