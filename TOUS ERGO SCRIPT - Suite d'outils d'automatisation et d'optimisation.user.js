@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      3.1
+// @version      3.2
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone en fenêtre flottante persistante (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4304,6 +4304,25 @@ https://www.tousergo.com`,
     // qu'un onglet 3CX enregistre un nouvel appel.
     // ------------------------------------------------------------
     const LDF_SESSION_KEY = 'te_ldf_session_v1';
+    // Signal séparé (pas la session) indiquant qu'une fenêtre flottante est
+    // actuellement ouverte et active. Sert uniquement à décider si un onglet
+    // 3CX doit tenter d'ouvrir une fenêtre ou juste transmettre l'appel à
+    // celle qui existe déjà — window.open() par nom n'est pas fiable pour
+    // réutiliser une fenêtre quand l'appel vient d'un onglet différent à
+    // chaque fois (constaté le 22/07/2026), donc on ne l'appelle QUE quand
+    // ce signal indique qu'aucune fenêtre n'est active.
+    const LDF_POPUP_ALIVE_KEY = 'te_ldf_popup_alive_v1';
+    const POPUP_ALIVE_STALE_MS = 6000;
+    let popupHeartbeatTimer = null;
+    function startPopupHeartbeat() {
+      if (popupHeartbeatTimer) return;
+      GM_setValue(LDF_POPUP_ALIVE_KEY, Date.now());
+      popupHeartbeatTimer = setInterval(() => GM_setValue(LDF_POPUP_ALIVE_KEY, Date.now()), 3000);
+    }
+    function popupAppearsAlive() {
+      const last = GM_getValue(LDF_POPUP_ALIVE_KEY, 0);
+      return (Date.now() - last) < POPUP_ALIVE_STALE_MS;
+    }
 
     function saveLdfSession(data) {
       try { GM_setValue(LDF_SESSION_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
@@ -4369,6 +4388,10 @@ https://www.tousergo.com`,
       `;
       document.documentElement.appendChild(style);
       document.title = '☎️ Levée de fiche — TOUS ERGO';
+      // Signale immédiatement (et en continu) que la fenêtre flottante est
+      // active, pour que les prochains onglets 3CX n'essaient pas d'en
+      // ouvrir une autre par-dessus.
+      startPopupHeartbeat();
     }
 
     function openOrFocusLdfPopup() {
@@ -4402,12 +4425,15 @@ https://www.tousergo.com`,
       if (urlPhone && !isPopupWindow) {
         // Onglet fraîchement ouvert par 3CX pour CET appel : on enregistre
         // l'appel dans le stockage partagé (la fenêtre flottante le
-        // récupère instantanément, qu'elle soit déjà ouverte ou en train
-        // de s'ouvrir), on ouvre/réactive la fenêtre flottante, puis on
-        // referme cet onglet — il n'a plus aucune utilité.
+        // récupère instantanément si elle est déjà ouverte). On n'essaie
+        // d'OUVRIR une fenêtre que si aucune n'est actuellement active —
+        // réutiliser une fenêtre existante par window.open() n'est pas
+        // fiable ici (chaque appel part d'un onglet différent), donc mieux
+        // vaut ne jamais réessayer d'en ouvrir une tant qu'une est vivante.
         openedFromLdfLink = true;
         saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
-        const popup = openOrFocusLdfPopup();
+        const popupAlreadyOpen = popupAppearsAlive();
+        const popup = popupAlreadyOpen ? null : openOrFocusLdfPopup();
 
         try { GM_closeTab(); } catch (e) { /* si refusé, filet de sécurité ci-dessous */ }
 
@@ -4420,9 +4446,11 @@ https://www.tousergo.com`,
         if (bodyEl) {
           const msg = document.createElement('div');
           msg.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;background:#714B67;color:#fff;padding:10px 14px;border-radius:8px;font:13px/1.4 sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:280px;';
-          msg.textContent = popup
-            ? 'La fiche client s\'est ouverte dans une fenêtre séparée. Vous pouvez fermer cet onglet.'
-            : 'Fenêtre flottante bloquée par le navigateur — autorisez les popups pour www.tousergo.com puis réessayez.';
+          msg.textContent = popupAlreadyOpen
+            ? 'La fiche client a été envoyée dans la fenêtre flottante déjà ouverte. Vous pouvez fermer cet onglet.'
+            : popup
+              ? 'La fiche client s\'est ouverte dans une fenêtre séparée. Vous pouvez fermer cet onglet.'
+              : 'Fenêtre flottante bloquée par le navigateur — autorisez les popups pour www.tousergo.com puis réessayez.';
           bodyEl.appendChild(msg);
         }
         return;
