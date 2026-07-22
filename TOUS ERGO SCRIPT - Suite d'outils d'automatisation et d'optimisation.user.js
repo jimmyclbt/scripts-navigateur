@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      3.6
+// @version      3.7
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets avec notification système (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
@@ -27,6 +27,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_addValueChangeListener
 // @grant        GM_registerMenuCommand
+// @grant        GM_notification
 // @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
 // @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
 // @run-at       document-idle
@@ -4355,6 +4356,27 @@ https://www.tousergo.com`,
     }
 
     // ------------------------------------------------------------
+    // Notification système : un script ne peut jamais forcer un ONGLET
+    // précis à passer au premier plan depuis un autre onglet (protection
+    // anti-abus des navigateurs) — mais une vraie notification système
+    // (comme pour un e-mail ou un message Slack) le peut, via un clic de
+    // l'utilisateur dessus. C'est la seule façon fiable de "retrouver" la
+    // bulle sans avoir à fouiller dans tous les onglets ouverts.
+    // ------------------------------------------------------------
+    function notifyIncomingCall(phone) {
+      try {
+        GM_notification({
+          text: `Fiche client prête pour ${phone}`,
+          title: '☎️ Levée de fiche TOUS ERGO',
+          timeout: 10000,
+          onclick: () => { window.focus(); },
+        });
+      } catch (e) {
+        console.warn('[LeveeDeFiche] Notification indisponible :', e);
+      }
+    }
+
+    // ------------------------------------------------------------
     // Point d'entrée : lit ?ldf_phone=... dans l'URL (nouvelle levée de
     // fiche 3CX) ou restaure la session active depuis sessionStorage
     // (l'agent a juste navigué vers une autre page du site).
@@ -4417,6 +4439,7 @@ https://www.tousergo.com`,
         // soit le filet de sécurité ci-dessus a pris le relais.
         phone = urlPhone;
         saveLdfSession({ phone, customers: null, panelState: 'normal' });
+        notifyIncomingCall(phone); // alerte l'agent où qu'il regarde, clic = focus direct sur cet onglet
       } else if (existingSession && existingSession.phone) {
         // Pas de paramètre dans l'URL : on est juste sur une nouvelle page
         // du site pendant que la levée de fiche précédente est toujours active.
