@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      2.8
+// @version      2.9
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4093,7 +4093,10 @@ https://www.tousergo.com`,
           <div class="te-ldf-body" id="te-ldf-body"></div>`;
         document.body.appendChild(panel);
         setPanelState(panel, initialState || 'normal');
-        startHeartbeat(); // cet onglet devient l'hôte tant que la bulle est affichée
+        // NB : le battement de cœur est démarré au chargement de la page (voir
+        // plus bas), pas ici — il ne doit PAS dépendre de la bulle affichée,
+        // sinon fermer la bulle rendrait l'onglet "invisible" pour le prochain
+        // appel et forcerait un nouvel onglet à chaque fois.
 
         function persistState(state) {
           const session = loadLdfSession();
@@ -4104,8 +4107,9 @@ https://www.tousergo.com`,
           const backdrop = document.getElementById('te-ldf-backdrop');
           if (backdrop) backdrop.remove();
           panel.remove();
-          stopHeartbeat();
           clearLdfSession(); // Fin de la levée de fiche : ferme la bulle sur TOUS les onglets ouverts.
+          // Le battement de cœur continue : cet onglet reste disponible pour
+          // accueillir directement le PROCHAIN appel, sans ouvrir de nouvel onglet.
         });
         panel.querySelector('[data-action="min"]').addEventListener('click', () => {
           const next = panel.dataset.state === 'min' ? 'normal' : 'min';
@@ -4447,7 +4451,18 @@ https://www.tousergo.com`,
       }
     });
 
+    // Vérifie d'abord si un appel est en cours à traiter (et si un AUTRE
+    // onglet est déjà disponible pour le récupérer), AVANT que cet onglet
+    // ne commence lui-même à s'annoncer comme disponible ci-dessous —
+    // sinon il se "verrait" toujours comme son propre relais possible.
     initLeveeDeFiche();
+
+    // Cet onglet est ouvert sur un site TOUS ERGO : il devient immédiatement
+    // "disponible" pour accueillir un futur appel (indépendamment du fait
+    // qu'une bulle soit affichée ou non). C'est ce qui permet à un appel
+    // suivant de s'afficher directement ICI plutôt que d'ouvrir un nouvel
+    // onglet — tant qu'au moins un onglet TOUS ERGO reste ouvert quelque part.
+    startHeartbeat();
   })();
 })();
 
