@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      3.5
+// @version      3.6
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4401,6 +4401,14 @@ https://www.tousergo.com`,
         }
       }
 
+      // À partir d'ici, cet onglet reste ouvert (hôte ou simple onglet de
+      // travail) : il peut légitimement s'annoncer comme disponible pour
+      // accueillir un futur appel. Les onglets "relais" ci-dessus (qui
+      // viennent de faire `return`) ne passent JAMAIS par cette ligne — sans
+      // quoi ils laisseraient une fausse trace de disponibilité juste avant
+      // de disparaître, trompant le prochain appel.
+      startHeartbeat();
+
       let phone;
       let cachedCustomers = null;
 
@@ -4478,18 +4486,10 @@ https://www.tousergo.com`,
       }
     });
 
-    // Vérifie d'abord si un appel est en cours à traiter (et si un AUTRE
-    // onglet est déjà disponible pour le récupérer), AVANT que cet onglet
-    // ne commence lui-même à s'annoncer comme disponible ci-dessous —
-    // sinon il se "verrait" toujours comme son propre relais possible.
+    // Point d'entrée du module. Le battement de cœur (disponibilité de cet
+    // onglet pour de futurs appels) est démarré à l'intérieur, uniquement
+    // pour les onglets qui restent réellement ouverts (voir plus haut).
     initLeveeDeFiche();
-
-    // Cet onglet est ouvert sur un site TOUS ERGO : il devient immédiatement
-    // "disponible" pour accueillir un futur appel (indépendamment du fait
-    // qu'une bulle soit affichée ou non). C'est ce qui permet à un appel
-    // suivant de s'afficher directement ICI plutôt que d'ouvrir un nouvel
-    // onglet — tant qu'au moins un onglet TOUS ERGO reste ouvert quelque part.
-    startHeartbeat();
   })();
 })();
 
