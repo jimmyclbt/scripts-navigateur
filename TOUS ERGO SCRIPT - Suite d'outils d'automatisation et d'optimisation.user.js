@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      2.6
+// @version      2.8
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4366,12 +4366,16 @@ https://www.tousergo.com`,
           // partagé, puis on referme cet onglet fraîchement ouvert par 3CX
           // pour éviter d'empiler les onglets à chaque décrochage.
           saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
-          setTimeout(() => {
-            try { GM_closeTab(); } catch (e) { /* si la fermeture est refusée, on laisse simplement cet onglet ouvert */ }
-          }, 350);
-          return;
+          try { GM_closeTab(); } catch (e) { /* si la fermeture est refusée, on continue ci-dessous */ }
+          // Filet de sécurité : si la fermeture n'a pas réellement eu lieu
+          // (onglet ouvert autrement que par le script, ou battement de
+          // cœur périmé d'un onglet déjà fermé), l'exécution continue ici
+          // après le délai — dans ce cas on affiche quand même la bulle
+          // dans CET onglet plutôt que de laisser l'agent face à une page
+          // sans aucune information.
+          await new Promise((r) => setTimeout(r, 700));
         }
-        // Personne d'autre n'affiche la bulle : cet onglet devient l'hôte.
+        // Onglet hôte (ou repli suite à l'échec de la fermeture ci-dessus).
         phone = urlPhone;
         saveLdfSession({ phone, customers: null, panelState: 'normal' });
       } else if (existingSession && existingSession.phone) {
@@ -4538,15 +4542,22 @@ https://www.tousergo.com`,
     return `${d}/${m}/${y}`;
   }
 
-  // Nombre de jours écoulés depuis une date Odoo "YYYY-MM-DD" (minuit local)
-  function daysSinceDate(odooDateValue) {
+  // Convertit un champ Date Odoo "YYYY-MM-DD" (pas Datetime) en objet Date locale.
+  function parseOdooDateOnly(odooDateValue) {
     if (!odooDateValue) return null;
     const [y, m, d] = odooDateValue.split('-').map(Number);
     if (!y || !m || !d) return null;
-    const then = new Date(y, m - 1, d);
-    const now = new Date();
-    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return Math.round((todayMidnight - then) / 86400000);
+    return new Date(y, m - 1, d);
+  }
+
+  // Nombre de jours (arrondi, minuit à minuit) entre deux dates. Si `toDate`
+  // est absent (ex: date de retour introuvable), on retombe sur aujourd'hui.
+  function daysBetweenDates(fromDate, toDate) {
+    if (!fromDate || isNaN(fromDate)) return null;
+    const ref = (toDate && !isNaN(toDate)) ? toDate : new Date();
+    const fromMidnight = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+    const refMidnight = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
+    return Math.round((refMidnight - fromMidnight) / 86400000);
   }
 
   function stripHtml(html) {
@@ -4891,22 +4902,18 @@ https://www.tousergo.com`,
       ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   }
 
-  function daysSinceDateObj(dateObj) {
-    if (!dateObj || isNaN(dateObj)) return null;
-    const now = new Date();
-    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const thenMidnight = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-    return Math.round((todayMidnight - thenMidnight) / 86400000);
-  }
-
   // ------------------------------------------------------------
   // Récupération de toutes les données pour un retour donné.
   // ------------------------------------------------------------
   async function fetchRetourInfo(retourId) {
-    const [retour] = await odooCall('eggs.presta.retour', 'read', [[retourId], ['order_id']]);
+    const [retour] = await odooCall('eggs.presta.retour', 'read', [[retourId], ['order_id', 'create_date']]);
     const orderRel = retour ? retour.order_id : null;
     const orderId = Array.isArray(orderRel) ? orderRel[0] : orderRel;
     if (!orderId) throw new Error("Ce retour n'est rattaché à aucune commande");
+    // Référence pour les "X jours depuis..." : la date de LA DEMANDE DE RETOUR
+    // (pas la date du jour), pour refléter le délai qui importait au moment
+    // du traitement, indépendamment de quand on consulte la fiche.
+    const retourDateObj = retour && retour.create_date ? new Date(retour.create_date.replace(' ', 'T') + 'Z') : null;
 
     const [order] = await odooCall('sale.order', 'read', [
       [orderId],
@@ -4967,23 +4974,43 @@ https://www.tousergo.com`,
       console.warn('[TE-Retour] Lecture notes impossible', e);
     }
 
-    return { order, shippingAddr, picking, refunds, messages, carrierInfo };
+    return { order, shippingAddr, picking, refunds, messages, carrierInfo, retourDateObj };
+  }
+
+  // Libellés FR pour les codes techniques Odoo (état des mouvements de stock,
+  // état des factures/avoirs, état de paiement) — sinon on affiche le code
+  // technique anglais brut dans la popup, ce qui n'est pas parlant.
+  const PICKING_STATE_LABELS = {
+    draft: 'brouillon', waiting: "en attente d'un autre mouvement",
+    confirmed: 'en attente de disponibilité', assigned: 'disponible',
+    done: 'fait', cancel: 'annulé',
+  };
+  const MOVE_STATE_LABELS = { draft: 'brouillon', posted: 'validée', cancel: 'annulée' };
+  const PAYMENT_STATE_LABELS = {
+    not_paid: 'non payé', in_payment: 'en cours de paiement', paid: 'payé',
+    partial: 'partiellement payé', reversed: 'extourné', invoicing_legacy: 'ancien système',
+  };
+  function trLabel(map, code) {
+    if (!code) return 'n/a';
+    return map[code] || code;
   }
 
   // ------------------------------------------------------------
   // Construction du HTML du corps de la popup (sans l'en-tête, géré à part)
   // ------------------------------------------------------------
-  function buildBodyHtml({ order, shippingAddr, picking, refunds, messages, carrierInfo }) {
+  function buildBodyHtml({ order, shippingAddr, picking, refunds, messages, carrierInfo, retourDateObj }) {
     const orderDate = fmtDatetime(order.date_order);
 
     let deliveryHtml;
     if (carrierInfo && carrierInfo.delivered) {
       // Date de livraison RÉELLE confirmée par le transporteur (pas la date
       // d'expédition d'Odoo) : on privilégie toujours cette source quand elle
-      // est disponible et indique explicitement "Livré".
-      const nbJours = daysSinceDateObj(carrierInfo.deliveredAt);
+      // est disponible et indique explicitement "Livré". Le délai est compté
+      // depuis la DATE DE LA DEMANDE DE RETOUR (pas la date du jour), pour
+      // rester correct même en consultant la fiche plusieurs jours après.
+      const nbJours = daysBetweenDates(carrierInfo.deliveredAt, retourDateObj);
       deliveryHtml = `📦 Livré le <strong>${escapeHtml(fmtDateObj(carrierInfo.deliveredAt) || '')}</strong>` +
-        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis la livraison` : '') +
+        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} avant la demande de retour` : '') +
         `<span class="te-rt-hint">Confirmé par le suivi transporteur${carrierInfo.detail ? ' — ' + escapeHtml(carrierInfo.detail) : ''}</span>`;
     } else if (carrierInfo) {
       // Pas encore livré, mais on a quand même le vrai statut en direct.
@@ -4991,7 +5018,7 @@ https://www.tousergo.com`,
       deliveryHtml = `🚚 ${escapeHtml(carrierInfo.statusLabel || 'Colis en cours')}` +
         (lastUpdateStr ? `<span class="te-rt-hint">Dernière info suivi : ${escapeHtml(lastUpdateStr)}</span>` : '');
     } else if (order.effective_date) {
-      const nbJours = daysSinceDate(order.effective_date);
+      const nbJours = daysBetweenDates(parseOdooDateOnly(order.effective_date), retourDateObj);
       // ⚠️ effective_date reflète la date de VALIDATION du bon de livraison
       // (= date d'envoi du colis), pas la date de livraison réelle confirmée
       // par le transporteur. Utilisé seulement en repli quand le suivi
@@ -5002,12 +5029,12 @@ https://www.tousergo.com`,
       const carrierSupported = picking && picking.carrier_tracking_url &&
         /chronopost|laposte\.fr|colissimo|gls|kuehne-nagel/i.test(picking.carrier_tracking_url);
       deliveryHtml = `🚚 Expédiée le <strong>${fmtDate(order.effective_date)}</strong>` +
-        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis l'expédition` : '') +
+        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} avant la demande de retour` : '') +
         `<span class="te-rt-hint">Date d'envoi du colis — voir le suivi ci-dessous pour la date de livraison réelle` +
         (carrierSupported ? ` · <a href="#" class="te-rt-retry">🔄 Réessayer le suivi</a>` : '') +
         `</span>`;
     } else if (picking) {
-      deliveryHtml = `🚚 Pas encore expédiée (statut du colis : ${escapeHtml(picking.state)})`;
+      deliveryHtml = `🚚 Pas encore expédiée (statut du colis : ${escapeHtml(trLabel(PICKING_STATE_LABELS, picking.state))})`;
     } else {
       deliveryHtml = `🚚 Aucune expédition enregistrée pour cette commande`;
     }
@@ -5039,7 +5066,7 @@ https://www.tousergo.com`,
         return `<div class="te-rt-refund-row">
           <span class="te-rt-dot" style="background:${color};"></span>
           Avoir <strong>${escapeHtml(r.name)}</strong> du ${fmtDate(r.invoice_date)} —
-          ${r.amount_total.toFixed(2)} € — état : ${escapeHtml(r.state)} — paiement : ${escapeHtml(r.invoice_payment_state || 'n/a')}
+          ${r.amount_total.toFixed(2)} € — état : ${escapeHtml(trLabel(MOVE_STATE_LABELS, r.state))} — paiement : ${escapeHtml(trLabel(PAYMENT_STATE_LABELS, r.invoice_payment_state))}
         </div>`;
       }).join('');
     }
