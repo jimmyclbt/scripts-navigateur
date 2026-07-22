@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      2.2
+// @version      2.3
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4596,7 +4596,20 @@ https://www.tousergo.com`,
   }
 
   // ---- Chronopost ----
+  // La protection anti-robot Cloudflare peut occasionnellement renvoyer une
+  // page HTML de vérification au lieu du JSON attendu (constaté le 22/07/2026
+  // sur un retour réel). Dans ce cas précis, on "réchauffe" la session en
+  // rechargeant une fois la page de suivi PUBLIQUE (celle que le bouton "Voir
+  // le suivi colis" ouvre normalement — elle pose les cookies nécessaires),
+  // puis on retente l'appel JSON une seule fois avant d'abandonner.
   function fetchChronopostStatus(trackingRef) {
+    return fetchChronopostJson(trackingRef).catch((err) => {
+      if (!/DOCTYPE|not valid JSON/i.test(err.message)) throw err; // autre type d'erreur : inutile de retenter
+      return warmUpChronopostSession(trackingRef).then(() => fetchChronopostJson(trackingRef));
+    });
+  }
+
+  function fetchChronopostJson(trackingRef) {
     const url = `https://www.chronopost.fr/tracking-no-cms/suivi-colis?&listeNumerosLT=${encodeURIComponent(trackingRef)}&langue=fr&_=${Date.now()}`;
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -4615,6 +4628,20 @@ https://www.tousergo.com`,
           }
         },
         onerror: () => reject(new Error('Erreur réseau Chronopost')),
+      });
+    });
+  }
+
+  function warmUpChronopostSession(trackingRef) {
+    const url = `https://www.chronopost.fr/tracking-no-cms/suivi-page?listeNumerosLT=${encodeURIComponent(trackingRef)}&langue=fr`;
+    return new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        timeout: 6000,
+        onload: () => resolve(),
+        onerror: () => resolve(),   // on tente quand même le second appel JSON même si le préchargement échoue
+        ontimeout: () => resolve(),
       });
     });
   }
