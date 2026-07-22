@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      2.9
+// @version      3.1
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone en fenêtre flottante persistante (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
@@ -3465,6 +3465,14 @@ https://www.tousergo.com`,
   (function () {
     'use strict';
 
+    // Vrai uniquement si CET onglet a été ouvert directement par le lien
+    // 3CX (?ldf_phone=...), par opposition à un onglet déjà ouvert qui se
+    // contente d'afficher la bulle via la synchro inter-onglets. Sert à
+    // savoir s'il faut refermer l'onglet automatiquement une fois l'appel
+    // terminé (fermeture de la bulle), sans jamais fermer les onglets de
+    // travail habituels de l'agent (Crisp, Odoo, Amazon...).
+    let openedFromLdfLink = false;
+
     // ------------------------------------------------------------
     // CONFIG — la clé Webservice n'est JAMAIS écrite en dur ici.
     // Elle est saisie une fois via le menu Tampermonkey et stockée
@@ -4110,6 +4118,14 @@ https://www.tousergo.com`,
           clearLdfSession(); // Fin de la levée de fiche : ferme la bulle sur TOUS les onglets ouverts.
           // Le battement de cœur continue : cet onglet reste disponible pour
           // accueillir directement le PROCHAIN appel, sans ouvrir de nouvel onglet.
+          if (openedFromLdfLink) {
+            // Cet onglet a été ouvert spécifiquement par le lien 3CX pour CET
+            // appel : une fois la bulle fermée (= appel terminé), on referme
+            // l'onglet automatiquement. Les onglets de travail habituels
+            // (Crisp, Odoo, Amazon...) qui affichaient juste la bulle en
+            // synchro ne sont jamais concernés par cette fermeture auto.
+            try { GM_closeTab(); } catch (e) { /* si refusé, l'onglet reste simplement ouvert */ }
+          }
         });
         panel.querySelector('[data-action="min"]').addEventListener('click', () => {
           const next = panel.dataset.state === 'min' ? 'normal' : 'min';
@@ -4284,13 +4300,10 @@ https://www.tousergo.com`,
     // Persistance PARTAGÉE ENTRE ONGLETS (GM_setValue/GM_getValue — contrairement
     // à sessionStorage, ce stockage est commun à tous les onglets où le script
     // tourne, quel que soit le site). Couplé à GM_addValueChangeListener, ça
-    // permet à la bulle de rester visible sur n'importe quel onglet déjà ouvert
-    // (Crisp, Amazon, Odoo…) sans avoir à en rouvrir un nouveau à chaque appel.
+    // permet à la fenêtre flottante de se mettre à jour instantanément dès
+    // qu'un onglet 3CX enregistre un nouvel appel.
     // ------------------------------------------------------------
     const LDF_SESSION_KEY = 'te_ldf_session_v1';
-    const LDF_HEARTBEAT_KEY = 'te_ldf_heartbeat_v1';
-    const HEARTBEAT_INTERVAL_MS = 2000;
-    const HEARTBEAT_STALE_MS = 4000;
 
     function saveLdfSession(data) {
       try { GM_setValue(LDF_SESSION_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
@@ -4303,24 +4316,6 @@ https://www.tousergo.com`,
     }
     function clearLdfSession() {
       try { GM_deleteValue(LDF_SESSION_KEY); } catch (e) { /* ignore */ }
-    }
-
-    // "Battement de cœur" : l'onglet qui affiche actuellement la bulle
-    // (l'hôte) signale toutes les 2s qu'il est vivant. Un nouvel onglet
-    // ouvert par 3CX vérifie ce battement avant de s'afficher : s'il est
-    // récent, un hôte existe déjà quelque part -> pas besoin d'un 2e onglet.
-    let heartbeatTimer = null;
-    function startHeartbeat() {
-      if (heartbeatTimer) return;
-      GM_setValue(LDF_HEARTBEAT_KEY, Date.now());
-      heartbeatTimer = setInterval(() => GM_setValue(LDF_HEARTBEAT_KEY, Date.now()), HEARTBEAT_INTERVAL_MS);
-    }
-    function stopHeartbeat() {
-      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    }
-    function anotherTabIsAlive() {
-      const last = GM_getValue(LDF_HEARTBEAT_KEY, 0);
-      return (Date.now() - last) < HEARTBEAT_STALE_MS;
     }
 
     // Enrichit chaque client en arrière-plan (groupe + commandes) et met à
@@ -4351,7 +4346,51 @@ https://www.tousergo.com`,
     // Point d'entrée : lit ?ldf_phone=... dans l'URL (nouvelle levée de
     // fiche 3CX) ou restaure la session active depuis sessionStorage
     // (l'agent a juste navigué vers une autre page du site).
+    //
+    // Architecture "fenêtre flottante" (depuis la v3.1) : la bulle ne vit
+    // plus dans l'onglet que 3CX ouvre à chaque appel — elle vit dans une
+    // VRAIE fenêtre de navigateur séparée (pas un onglet), ouverte une
+    // seule fois et réutilisée pour tous les appels suivants. L'onglet que
+    // 3CX ouvre à chaque décrochage devient un simple porte-message
+    // jetable : il transmet le numéro à la fenêtre flottante puis se
+    // referme tout seul.
     // ------------------------------------------------------------
+    const LDF_POPUP_WINDOW_NAME = 'tousergo_ldf_popup';
+    const isPopupWindow = (window.name === LDF_POPUP_WINDOW_NAME);
+
+    if (isPopupWindow) {
+      // On masque le contenu normal du site derrière la bulle : cette
+      // fenêtre est dédiée à la levée de fiche, elle ne doit pas ressembler
+      // à une page web classique avec une bulle flottant par-dessus.
+      const style = document.createElement('style');
+      style.textContent = `
+        html, body { background:#f4f2f4 !important; overflow:hidden !important; }
+        body > *:not(#te-ldf-panel):not(script):not(style) { display:none !important; }
+      `;
+      document.documentElement.appendChild(style);
+      document.title = '☎️ Levée de fiche — TOUS ERGO';
+    }
+
+    function openOrFocusLdfPopup() {
+      // window.open() avec un nom de fenêtre déjà utilisé RÉUTILISE cette
+      // fenêtre (et la place au premier plan) au lieu d'en ouvrir une
+      // nouvelle — c'est ce qui permet à une seule fenêtre de servir pour
+      // tous les appels de la journée.
+      const w = Math.min(380, Math.round(screen.availWidth * 0.28));
+      const h = Math.min(620, Math.round(screen.availHeight * 0.85));
+      const left = Math.max(0, screen.availWidth - w - 20);
+      const top = 60;
+      try {
+        return window.open(
+          'https://www.tousergo.com/',
+          LDF_POPUP_WINDOW_NAME,
+          `width=${w},height=${h},left=${left},top=${top},popup=yes,resizable=yes,scrollbars=yes`
+        );
+      } catch (e) {
+        return null;
+      }
+    }
+
     async function initLeveeDeFiche() {
       // Note : un "+" littéral dans l'URL (ex: ?ldf_phone=+33676589181) est
       // décodé en espace par URLSearchParams — on le retire simplement,
@@ -4360,35 +4399,55 @@ https://www.tousergo.com`,
       const urlPhone = (ldfParams.get('ldf_phone') || '').trim();
       const existingSession = loadLdfSession();
 
+      if (urlPhone && !isPopupWindow) {
+        // Onglet fraîchement ouvert par 3CX pour CET appel : on enregistre
+        // l'appel dans le stockage partagé (la fenêtre flottante le
+        // récupère instantanément, qu'elle soit déjà ouverte ou en train
+        // de s'ouvrir), on ouvre/réactive la fenêtre flottante, puis on
+        // referme cet onglet — il n'a plus aucune utilité.
+        openedFromLdfLink = true;
+        saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
+        const popup = openOrFocusLdfPopup();
+
+        try { GM_closeTab(); } catch (e) { /* si refusé, filet de sécurité ci-dessous */ }
+
+        // Filet de sécurité : si l'onglet est toujours là après le délai
+        // (fermeture refusée par le navigateur), on affiche un message
+        // discret plutôt que de laisser une page vide sans explication —
+        // la vraie bulle, elle, est déjà à jour dans la fenêtre flottante.
+        await new Promise((r) => setTimeout(r, 700));
+        const bodyEl = document.body;
+        if (bodyEl) {
+          const msg = document.createElement('div');
+          msg.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;background:#714B67;color:#fff;padding:10px 14px;border-radius:8px;font:13px/1.4 sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:280px;';
+          msg.textContent = popup
+            ? 'La fiche client s\'est ouverte dans une fenêtre séparée. Vous pouvez fermer cet onglet.'
+            : 'Fenêtre flottante bloquée par le navigateur — autorisez les popups pour www.tousergo.com puis réessayez.';
+          bodyEl.appendChild(msg);
+        }
+        return;
+      }
+
       let phone;
       let cachedCustomers = null;
 
-      if (urlPhone) {
-        if (anotherTabIsAlive()) {
-          // Un onglet TOUS ERGO affiche déjà la bulle quelque part (Crisp,
-          // Odoo, Amazon…) : on lui transmet le nouvel appel via le stockage
-          // partagé, puis on referme cet onglet fraîchement ouvert par 3CX
-          // pour éviter d'empiler les onglets à chaque décrochage.
-          saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
-          try { GM_closeTab(); } catch (e) { /* si la fermeture est refusée, on continue ci-dessous */ }
-          // Filet de sécurité : si la fermeture n'a pas réellement eu lieu
-          // (onglet ouvert autrement que par le script, ou battement de
-          // cœur périmé d'un onglet déjà fermé), l'exécution continue ici
-          // après le délai — dans ce cas on affiche quand même la bulle
-          // dans CET onglet plutôt que de laisser l'agent face à une page
-          // sans aucune information.
-          await new Promise((r) => setTimeout(r, 700));
-        }
-        // Onglet hôte (ou repli suite à l'échec de la fermeture ci-dessus).
+      if (urlPhone && isPopupWindow) {
+        // Cas rare : la fenêtre flottante elle-même a été ouverte avec le
+        // paramètre dans l'URL (ex: tout premier appel de la session).
         phone = urlPhone;
         saveLdfSession({ phone, customers: null, panelState: 'normal' });
       } else if (existingSession && existingSession.phone) {
-        // Pas de paramètre dans l'URL : on est juste sur une nouvelle page
-        // du site pendant que la levée de fiche précédente est toujours active.
+        // Pas de paramètre dans l'URL : soit la fenêtre flottante vient de
+        // s'ouvrir et récupère l'appel déjà enregistré, soit un onglet de
+        // travail classique navigue pendant qu'une levée de fiche est active.
         phone = existingSession.phone;
         cachedCustomers = existingSession.customers;
+      } else if (isPopupWindow) {
+        // Fenêtre flottante ouverte mais aucun appel en cours : état d'attente.
+        renderPanel('<div class="te-ldf-msg">☎️ En attente d\'un appel…</div>', '', 'normal');
+        return;
       } else {
-        return; // Rien à afficher.
+        return; // Onglet de travail classique, rien à afficher.
       }
 
       const savedState = (loadLdfSession() || {}).panelState || 'normal';
@@ -4451,18 +4510,9 @@ https://www.tousergo.com`,
       }
     });
 
-    // Vérifie d'abord si un appel est en cours à traiter (et si un AUTRE
-    // onglet est déjà disponible pour le récupérer), AVANT que cet onglet
-    // ne commence lui-même à s'annoncer comme disponible ci-dessous —
-    // sinon il se "verrait" toujours comme son propre relais possible.
+    // Point d'entrée du module : gère à la fois les onglets 3CX jetables et
+    // la fenêtre flottante persistante (voir openOrFocusLdfPopup ci-dessus).
     initLeveeDeFiche();
-
-    // Cet onglet est ouvert sur un site TOUS ERGO : il devient immédiatement
-    // "disponible" pour accueillir un futur appel (indépendamment du fait
-    // qu'une bulle soit affichée ou non). C'est ce qui permet à un appel
-    // suivant de s'afficher directement ICI plutôt que d'ouvrir un nouvel
-    // onglet — tant qu'au moins un onglet TOUS ERGO reste ouvert quelque part.
-    startHeartbeat();
   })();
 })();
 
