@@ -22,8 +22,8 @@
 // @grant        GM_deleteValue
 // @grant        GM_closeTab
 // @grant        GM_registerMenuCommand
-// @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20TOOLKIT.user.js
-// @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20TOOLKIT.user.js
+// @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
+// @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
 // @run-at       document-idle
 // ==/UserScript==
 
