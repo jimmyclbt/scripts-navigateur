@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      2.4
+// @version      2.5
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4611,11 +4611,20 @@ https://www.tousergo.com`,
 
   function fetchChronopostJson(trackingRef) {
     const url = `https://www.chronopost.fr/tracking-no-cms/suivi-colis?&listeNumerosLT=${encodeURIComponent(trackingRef)}&langue=fr&_=${Date.now()}`;
+    // Le vrai appel AJAX de la page de suivi part avec un Referer pointant vers
+    // la page "suivi-page" elle-même — on soupçonne le serveur de filtrer les
+    // requêtes qui n'ont pas ce Referer (accès direct à l'API = typique d'un
+    // robot). GM_xmlhttpRequest peut fixer ce header, contrairement à un fetch
+    // normal de page (restriction du navigateur, contournée par Tampermonkey).
+    const refererUrl = `https://www.chronopost.fr/tracking-no-cms/suivi-page?listeNumerosLT=${encodeURIComponent(trackingRef)}`;
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'GET',
         url,
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': refererUrl,
+        },
         onload: (res) => {
           try {
             const data = JSON.parse(res.responseText);
