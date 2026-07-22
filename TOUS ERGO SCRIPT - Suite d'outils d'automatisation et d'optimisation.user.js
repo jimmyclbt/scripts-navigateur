@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      3.3
+// @version      3.4
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4310,6 +4310,7 @@ https://www.tousergo.com`,
     let heartbeatTimer = null;
     function startHeartbeat() {
       if (heartbeatTimer) return;
+      console.log('[LeveeDeFiche][DIAG] Battement de cœur démarré sur cet onglet (v3.4) —', location.hostname);
       GM_setValue(LDF_HEARTBEAT_KEY, Date.now());
       heartbeatTimer = setInterval(() => GM_setValue(LDF_HEARTBEAT_KEY, Date.now()), HEARTBEAT_INTERVAL_MS);
     }
@@ -4377,17 +4378,21 @@ https://www.tousergo.com`,
 
       if (urlPhone) {
         openedFromLdfLink = true;
-        if (anotherTabIsAlive()) {
+        const heartbeatAge = Date.now() - GM_getValue(LDF_HEARTBEAT_KEY, 0);
+        const alive = heartbeatAge < HEARTBEAT_STALE_MS;
+        console.log('[LeveeDeFiche][DIAG] Nouvel appel', urlPhone, '— dernier battement il y a', heartbeatAge, 'ms — considéré actif :', alive, '(script v3.4)');
+        if (alive) {
           // Un onglet TOUS ERGO est déjà ouvert quelque part : on lui
           // transmet l'appel via le stockage partagé (il l'affichera
           // automatiquement via la synchro ci-dessous), puis on referme cet
           // onglet fraîchement ouvert par 3CX — il ne sert plus à rien.
           saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
-          try { GM_closeTab(); } catch (e) { /* si refusé, filet de sécurité ci-dessous */ }
+          try { GM_closeTab(); console.log('[LeveeDeFiche][DIAG] GM_closeTab() appelé sans exception'); } catch (e) { console.warn('[LeveeDeFiche][DIAG] GM_closeTab() a levé une erreur :', e); }
           // Filet de sécurité : si la fermeture n'a pas eu lieu (refusée par
           // le navigateur), on affiche quand même la bulle ICI plutôt que
           // de laisser l'agent face à un onglet vide.
           await new Promise((r) => setTimeout(r, 700));
+          console.log('[LeveeDeFiche][DIAG] Toujours là 700ms après GM_closeTab() : la fermeture a donc échoué.');
         }
       }
 
