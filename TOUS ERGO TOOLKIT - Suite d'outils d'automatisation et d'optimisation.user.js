@@ -3,7 +3,7 @@
 // @namespace    tousergo
 // @version      1.5
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, automatisation Crisp, boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX).
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
@@ -12,6 +12,9 @@
 // @match        https://tousergo.eggs-solutions.fr/synchro_commande*
 // @connect      tousergo.eggs-solutions.fr
 // @connect      www.tousergo.com
+// @connect      logic.azure.com
+// @connect      azure-apim.net
+// @connect      environment.api.powerplatform.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setClipboard
 // @grant        GM_setValue
@@ -125,10 +128,11 @@
         defaultEncours: 5000,
 
         // ==========================================================
-        // VALIDATION DE COMPTE EN 1 CLIC — 4 raccourcis combinant
-        // groupe + encours + délai de paiement + envoi du mail Crisp
-        // correspondant (raccourci "!..."). "groupValue" = id_group
-        // PrestaShop (même logique que priorityGroupValues ci-dessus).
+        // VALIDATION DE COMPTE EN 1 CLIC — 4 presets combinant
+        // groupe + encours + délai de paiement + mail de validation
+        // (envoyé via Power Automate, voir CONFIG.emailValidation
+        // plus bas). "groupValue" = id_group PrestaShop (même logique
+        // que priorityGroupValues ci-dessus).
         // ==========================================================
         validationPresets: [
           {
@@ -138,7 +142,23 @@
             groupValue: '26',
             encours: 0,
             delai: 0,
-            macro: '!validé-0%-avt',
+            emailSubject: 'Validation de votre compte professionnel',
+            emailBody:
+`Bonjour,
+
+Nous avons le plaisir de vous informer que votre compte client sur notre site tousergo.com a été validé ! ✅
+
+L'ensemble de notre catalogue, avec les tarifs actualisés, est consultable librement sur notre site.
+Vous pouvez désormais vous connecter pour établir vos devis en ligne ou pour passer vos commandes en paiement immédiat.
+
+Conformément à nos conditions commerciales, vous bénéficiez des avantages suivants :
+➡️ Pas de minimum de commande
+➡️ Frais de port offerts à partir de 180 € d'achats (ou 99 € pour la catégorie "Incontinence") hors produits volumineux
+
+Nous restons à votre disposition et vous souhaitons une bonne journée.
+
+L'équipe TOUS ERGO
+https://www.tousergo.com`,
           },
           {
             id: 'pro0-30j',
@@ -147,7 +167,31 @@
             groupValue: '69',
             encours: 5000,
             delai: 30,
-            macro: '!validé-0%-30j',
+            emailSubject: 'Validation de votre compte professionnel',
+            emailBody:
+`Bonjour,
+
+Nous avons le plaisir de vous informer que votre compte client sur notre site tousergo.com a été validé ! ✅
+
+L'ensemble de notre catalogue, avec les tarifs actualisés, est consultable librement sur notre site, sur lequel vous pouvez établir vos devis en autonomie ou même passer des commandes en paiement immédiat.
+
+Conformément à nos conditions commerciales, vous bénéficiez des avantages suivants :
+➡️ Pas de minimum de commande
+➡️ Paiement à réception de facture sous 30 jours fin de mois
+
+Pour passer commande avec paiement à réception de marchandises, cela s'effectue uniquement par e-mail à pro@tousergo.com.
+Vous pouvez nous envoyer vos bons de commande avec les informations suivantes :
+- Numéro SIRET
+- Adresse e-mail du service comptabilité
+- Adresses de facturation et de livraison
+- Références "Chorus Pro" si une facture doit y être déposée
+
+En l'absence de bon de commande, vous pouvez également nous transmettre un devis signé incluant les mêmes informations.
+
+Nous restons à votre disposition et vous souhaitons une bonne journée.
+
+L'équipe TOUS ERGO
+https://www.tousergo.com`,
           },
           {
             id: 'pro0-45j',
@@ -156,7 +200,31 @@
             groupValue: '69',
             encours: 5000,
             delai: 45,
-            macro: '!validé-0%-45j',
+            emailSubject: 'Validation de votre compte professionnel',
+            emailBody:
+`Bonjour,
+
+Nous avons le plaisir de vous informer que votre compte client sur notre site tousergo.com a été validé ! ✅
+
+L'ensemble de notre catalogue, avec les tarifs actualisés, est consultable librement sur notre site, sur lequel vous pouvez établir vos devis en autonomie ou même passer des commandes en paiement immédiat.
+
+Conformément à nos conditions commerciales, vous bénéficiez des avantages suivants :
+➡️ Pas de minimum de commande
+➡️ Paiement à réception de facture sous 45 jours fin de mois
+
+Pour passer commande avec paiement à réception de marchandises, cela s'effectue uniquement par e-mail à pro@tousergo.com.
+Vous pouvez nous envoyer vos bons de commande avec les informations suivantes :
+- Numéro SIRET
+- Adresse e-mail du service comptabilité
+- Adresses de facturation et de livraison
+- Références "Chorus Pro" si une facture doit y être déposée
+
+En l'absence de bon de commande, vous pouvez également nous transmettre un devis signé incluant les mêmes informations.
+
+Nous restons à votre disposition et vous souhaitons une bonne journée.
+
+L'équipe TOUS ERGO
+https://www.tousergo.com`,
           },
           {
             id: 'revendeur15-avt',
@@ -165,9 +233,55 @@
             groupValue: '67',
             encours: 0,
             delai: 0,
-            macro: '!validé-15%-revendeur',
+            emailSubject: 'Validation de votre compte revendeur',
+            emailBody:
+`Bonjour,
+
+Nous avons le plaisir de vous informer que votre compte client sur notre site tousergo.com a été validé ! ✅
+
+Vous pouvez désormais vous connecter pour établir vos devis en ligne ou pour passer vos commandes en toute autonomie en paiement immédiat.
+
+Par défaut, votre compte bénéficie des avantages suivants :
+➡️ Aucun minimum d'achat, pour commander selon vos besoins
+➡️ Remise exclusive de 15 % sur tous nos produits, appliquée directement sur les prix publics TTC affichés en ligne
+➡️ Franco de port à partir de 200 € d'achats TTC (hors produits volumineux et hors frais de livraison)
+➡️ Paiement avant expédition via les modes de règlement disponibles sur notre site
+
+Ces avantages sont appliqués automatiquement lorsque vous êtes connecté à votre compte. La remise est directement intégrée aux prix affichés.
+Pour consulter les prix publics, il est nécessaire de vous déconnecter ou d'ouvrir une fenêtre de navigation privée.
+
+⭐️ Nos conditions sont évolutives : plus votre volume d'achats est important, plus vous pouvez bénéficier d'avantages complémentaires :
+- Optimisation de la remise
+- Réduction du franco de port
+- Délais de paiement à 30 ou 45 jours
+- Remises additionnelles sur nos gammes phares
+- Pourcentage spécifique reversé BFA (Bonus Fidélité Annuel)
+
+Après plusieurs commandes, notre commercial expert pro pourra organiser un point avec vous afin d'évaluer ensemble les opportunités d'évolution et de construire un partenariat durable et bénéfique pour vous.
+
+Nous restons à votre entière disposition.
+
+Bonne journée,
+
+L'équipe TOUS ERGO
+https://www.tousergo.com`,
           },
         ],
+      },
+
+      // ==========================================================
+      // VALIDATION PAR E-MAIL — envoi direct depuis contact@tousergo.com
+      // via un flux Power Automate déclenché par requête HTTP (remplace
+      // l'automatisation Crisp, trop instable côté clics automatisés).
+      // ==========================================================
+      emailValidation: {
+        // URL du déclencheur HTTP du flux Power Automate (Instant Cloud
+        // Flow → "Quand une requête HTTP est reçue"). Visible dans Power
+        // Automate après le 1er enregistrement du flux, dans le bloc de
+        // déclenchement ("URL HTTP POST"). À traiter comme un secret : ne
+        // pas partager ce fichier une fois l'URL renseignée.
+        powerAutomateUrl: 'https://defaultfa64b60da40e453eb4f80e8b5d37f3.65.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/23/workflows/62f3a2c377ee4bd5bb4335e8722ce002/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=CjjZTftJyr9ib_mE3qhK5gzD33E50db8SK2ENeDnZbU',
+        fromDisplayName: 'TOUS ERGO',
       },
 
       // ==========================================================
@@ -427,6 +541,24 @@
       .te-badge-ok { color: #2ba700; font-weight: bold; }
       .te-badge-ko { color: #c00; font-weight: bold; }
       .te-note { margin-top: 14px; padding: 8px 10px; background: #fff8e1; border: 1px solid #ffe082; border-radius: 4px; color: #6b5900; font-size: 12px; }
+      .te-email-field { display: block; width: 100%; box-sizing: border-box; margin: 4px 0 14px 0;
+        padding: 8px 10px; font-size: 13px; border: 1px solid #d5dde0; border-radius: 4px; font-family: inherit; }
+      .te-email-field[readonly] { background: #f5f7f8; color: #666; }
+      .te-email-body { min-height: 220px; resize: vertical; line-height: 1.5; }
+      .te-email-label { font-size: 12px; font-weight: 600; color: #555; margin-top: 10px; display: block; }
+      .te-email-actions { display: flex; gap: 10px; margin-top: 14px; }
+      .te-email-send-btn {
+        padding: 10px 22px; font-size: 14px; font-weight: 600;
+        border: none; border-radius: 6px; color: #fff; cursor: pointer;
+        background: linear-gradient(135deg, #2e9d5e, #257e4c);
+        box-shadow: 0 3px 10px rgba(46,157,94,.35);
+      }
+      .te-email-send-btn:disabled { opacity: .6; cursor: default; }
+      .te-email-cancel-btn {
+        padding: 10px 18px; font-size: 14px; border-radius: 6px; cursor: pointer;
+        border: 1px solid #ccc; background: #fff; color: #555;
+      }
+      .te-email-status { margin-top: 10px; font-size: 13px; }
       .te-input { width: 100%; padding: 5px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 13px; box-sizing: border-box; margin-bottom: 4px; }
       #te-domain-card table { width: 100%; border-collapse: collapse; margin-top: 8px; }
       #te-domain-card th, #te-domain-card td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 13px; }
@@ -1176,7 +1308,7 @@
 
       const info = getCurrentCustomerInfo();
       if (!info?.email) {
-        showModal(`<h2>Validation de compte</h2><p style="color:#c00">Impossible de récupérer l'e-mail du client sur cette page — nécessaire pour l'envoi Crisp.</p>`);
+        showModal(`<h2>Validation de compte</h2><p style="color:#c00">Impossible de récupérer l'e-mail du client sur cette page — nécessaire pour l'envoi du mail de validation.</p>`);
         return;
       }
 
@@ -1205,11 +1337,10 @@
         <div class="te-row"><div class="te-row-label">Client</div><div class="te-row-value">${info.email}</div></div>
         <div class="te-row"><div class="te-row-label">Groupe</div><div class="te-row-value">${targetGroup.label}</div></div>
         <div class="te-row"><div class="te-row-label">Encours autorisé</div><div class="te-row-value">${preset.encours} €</div></div>
-        <div class="te-row"><div class="te-row-label">Délai de paiement</div><div class="te-row-value">${preset.delai} jours</div></div>
-        <div class="te-row" style="border-bottom:none;"><div class="te-row-label">Mail Crisp</div><div class="te-row-value">raccourci ${preset.macro}</div></div>
+        <div class="te-row" style="border-bottom:none;"><div class="te-row-label">Délai de paiement</div><div class="te-row-value">${preset.delai} jours</div></div>
         ${CONFIG.quickActions.dryRun
           ? `<div class="te-note">Mode test activé (CONFIG.quickActions.dryRun = true) : rien ne sera envoyé, les données seront affichées dans la console (F12).</div>`
-          : `<div class="te-note">Cette action va changer le groupe du compte, mettre à jour l'encours/délai de paiement, puis ouvrir Crisp pour envoyer le mail de validation.</div>`}
+          : `<div class="te-note">Cette action va changer le groupe du compte, mettre à jour l'encours/délai de paiement, puis ouvrir une popup pour envoyer le mail de validation (modifiable avant envoi).</div>`}
         <button type="button" class="te-validate-btn" id="te-validation-confirm">✓ Confirmer la validation</button>
       `);
 
@@ -1226,7 +1357,7 @@
           editLink,
           info.email,
           odooEnabled,
-          preset.macro
+          () => new Promise(resolve => showEmailComposeModal(preset, info.email, resolve))
         );
       });
     }
@@ -1323,7 +1454,7 @@
       return num.toFixed(6).replace('.', ',');
     }
 
-    async function submitCustomerUpdate(form, groupValue, defaultGroupValue, encoursValue, delaiValue, editLink, customerEmail, syncOdoo, crispMacro) {
+    async function submitCustomerUpdate(form, groupValue, defaultGroupValue, encoursValue, delaiValue, editLink, customerEmail, syncOdoo, onSuccess) {
       const fields = CONFIG.quickActions.formFields;
 
       // Coche uniquement le groupe choisi (décoche les autres)
@@ -1359,8 +1490,8 @@
         if (syncOdoo) {
           console.log('%c[TousErgo/Odoo sync] DRY RUN — écrirait', CONFIG.odooSync.encoursField, '=', encoursValue, 'pour', customerEmail);
         }
-        if (crispMacro) {
-          console.log('%c[TousErgo/Crisp] DRY RUN — ouvrirait Crisp avec le raccourci', crispMacro, 'pour', customerEmail);
+        if (onSuccess) {
+          console.log('%c[TousErgo] DRY RUN — déclencherait l\'action de suivi (ex: popup e-mail) pour', customerEmail);
         }
         showModal(`<h2>Mode test</h2><p>Rien n'a été envoyé. Le détail des champs qui auraient été soumis est dans la console (F12).</p>`);
         return;
@@ -1392,22 +1523,152 @@
               : `<p style="color:#c00">Synchronisation Odoo échouée : ${odooResult.message}</p>`;
           }
 
-          let crispBlock = '';
-          if (crispMacro) {
-            const crispResult = stageCrispMacro(customerEmail, crispMacro);
-            crispBlock = crispResult.ok
-              ? `<p class="te-badge-ok">✓ ${crispResult.message}</p>`
-              : `<p style="color:#c00">Envoi Crisp échoué : ${crispResult.message}</p>`;
+          if (onSuccess) {
+            // L'action de suivi (ex: popup de composition d'e-mail) gère sa
+            // propre modale — on ne rajoute pas de "Mise à jour effectuée"
+            // par-dessus, et on attend qu'elle soit terminée (envoyée ou
+            // annulée) avant de recharger la page, pour ne pas la couper.
+            if (odooBlock) showModal(`<h2>Mise à jour effectuée</h2><p>Compte client mis à jour.</p>${odooBlock}`);
+            await new Promise(r => setTimeout(r, odooBlock ? 900 : 0));
+            await onSuccess();
+            location.reload();
+            return;
           }
 
-          showModal(`<h2>Mise à jour effectuée</h2><p>Compte client mis à jour.</p>${odooBlock}${crispBlock}<p>La page va se recharger.</p>`);
-          setTimeout(() => location.reload(), (odooBlock || crispBlock) ? 2200 : 1200);
+          showModal(`<h2>Mise à jour effectuée</h2><p>Compte client mis à jour.</p>${odooBlock}<p>La page va se recharger.</p>`);
+          setTimeout(() => location.reload(), odooBlock ? 2200 : 1200);
         } else {
           showModal(`<h2>Erreur</h2><p style="color:#c00">Erreur lors de l'enregistrement (code ${res.status}). Vérifie manuellement via "Modifier".</p>`);
         }
       } catch (err) {
         showModal(`<h2>Erreur</h2><p style="color:#c00">Erreur réseau lors de l'enregistrement : ${err.message}</p>`);
       }
+    }
+
+    // ============================================================
+    // 4bis. VALIDATION PAR E-MAIL — remplace l'automatisation Crisp
+    //    (trop peu fiable côté clics automatisés) par un envoi direct
+    //    depuis contact@tousergo.com via un flux Power Automate, avec
+    //    une popup de relecture/édition avant envoi.
+    // ============================================================
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Affiche la popup de composition du mail de validation, pré-remplie
+    // depuis le preset (sujet + corps), modifiable avant envoi. onDone()
+    // est appelé une fois la popup fermée, quelle que soit la façon dont
+    // elle se ferme (envoyé, annulé, croix, clic en dehors, touche Echap)
+    // — via un MutationObserver qui détecte la disparition de la modale,
+    // pour ne jamais laisser l'appelant bloqué en attente indéfiniment.
+    function showEmailComposeModal(preset, toEmail, onDone) {
+      let settled = false;
+      const finish = () => { if (!settled) { settled = true; onDone(); } };
+
+      const backdrop = showModal(`
+        <h2>Mail de validation — ${escapeHtml(preset.label)}</h2>
+        <label class="te-email-label">À</label>
+        <input type="email" class="te-email-field" id="te-email-to" value="${escapeHtml(toEmail)}" readonly>
+        <label class="te-email-label">Sujet</label>
+        <input type="text" class="te-email-field" id="te-email-subject" value="${escapeHtml(preset.emailSubject)}">
+        <label class="te-email-label">Message</label>
+        <textarea class="te-email-field te-email-body" id="te-email-body">${escapeHtml(preset.emailBody)}</textarea>
+        <div class="te-email-actions">
+          <button type="button" class="te-email-send-btn" id="te-email-send">✉️ Envoyer le mail</button>
+          <button type="button" class="te-email-cancel-btn" id="te-email-cancel">Ne pas envoyer</button>
+        </div>
+        <div class="te-email-status" id="te-email-status"></div>
+      `);
+
+      const observer = new MutationObserver(() => {
+        if (!document.body.contains(backdrop)) { observer.disconnect(); finish(); }
+      });
+      observer.observe(document.body, { childList: true });
+
+      backdrop.querySelector('#te-email-cancel').addEventListener('click', closeModal);
+
+      backdrop.querySelector('#te-email-send').addEventListener('click', async () => {
+        const btn = backdrop.querySelector('#te-email-send');
+        const statusEl = backdrop.querySelector('#te-email-status');
+        const subject = backdrop.querySelector('#te-email-subject').value.trim();
+        const body = backdrop.querySelector('#te-email-body').value;
+
+        if (!subject || !body.trim()) {
+          statusEl.innerHTML = '<span style="color:#c00">Le sujet et le message ne peuvent pas être vides.</span>';
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Envoi en cours...';
+        statusEl.textContent = '';
+
+        const result = await sendValidationEmail(toEmail, subject, body);
+        if (result.ok) {
+          statusEl.innerHTML = `<span class="te-badge-ok">✓ ${result.message}</span>`;
+          setTimeout(closeModal, 1200);
+        } else {
+          statusEl.innerHTML = `<span style="color:#c00">${result.message}</span>`;
+          btn.disabled = false;
+          btn.textContent = '✉️ Envoyer le mail';
+        }
+      });
+    }
+
+    // Envoie le mail via le flux Power Automate (déclencheur HTTP). Le
+    // flux se charge d'appeler "Envoyer un e-mail (V2)" côté Office 365
+    // Outlook avec contact@tousergo.com comme expéditeur — voir la doc
+    // fournie pour la configuration du flux. Utilise GM_xmlhttpRequest
+    // (pas fetch) pour contourner les restrictions CORS, Power Automate
+    // ne renvoyant pas d'en-têtes CORS permissifs par défaut.
+    // Convertit un texte brut (celui tapé dans la popup) en HTML simple :
+    // échappe les caractères spéciaux puis remplace les retours à la ligne
+    // par des <br>. Nécessaire pour que la mise en forme (paragraphes,
+    // sauts de ligne) soit conservée dans l'e-mail — sans ça, la plupart
+    // des clients mail ignorent les simples retours à la ligne du texte
+    // brut. Côté Power Automate, il faut activer "Corps est au format
+    // HTML ?" = Oui sur l'action "Envoyer un e-mail (V2)" pour que ce HTML
+    // soit interprété plutôt qu'affiché tel quel.
+    function textToHtml(text) {
+      return escapeHtml(text).split('\n').join('<br>');
+    }
+
+    function sendValidationEmail(to, subject, body) {
+      // ⚠️ NE PAS coller ton URL ici : c'est juste une vérification de
+      // sécurité (garde-fou) qui lit CONFIG.emailValidation.powerAutomateUrl
+      // tout en haut du fichier (dans CONFIG) — c'est LÀ qu'il faut coller
+      // ta vraie URL, pas dans cette fonction.
+      const url = CONFIG.emailValidation.powerAutomateUrl;
+      if (!url || url.includes('REMPLACE-PAR-TON-URL')) {
+        return Promise.resolve({ ok: false, message: 'URL Power Automate non configurée — voir CONFIG.emailValidation.powerAutomateUrl.' });
+      }
+      return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url,
+          headers: { 'Content-Type': 'application/json' },
+          data: JSON.stringify({
+            to,
+            subject,
+            body: textToHtml(body),
+            fromDisplayName: CONFIG.emailValidation.fromDisplayName,
+          }),
+          onload: (res) => {
+            if (res.status >= 200 && res.status < 300) {
+              resolve({ ok: true, message: `Mail envoyé à ${to}.` });
+            } else {
+              resolve({ ok: false, message: `Échec de l'envoi (code ${res.status}). Vérifie le flux Power Automate.` });
+            }
+          },
+          onerror: () => resolve({ ok: false, message: 'Erreur réseau lors de l\'envoi. Vérifie l\'URL Power Automate et le @connect dans l\'en-tête du script.' }),
+          ontimeout: () => resolve({ ok: false, message: 'Délai dépassé lors de l\'envoi.' }),
+          timeout: 20000,
+        });
+      });
     }
 
     // ============================================================
