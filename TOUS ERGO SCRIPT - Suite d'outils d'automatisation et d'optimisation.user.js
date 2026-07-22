@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      1.6
+// @version      1.7
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX), fiche Retour enrichie (infos commande/livraison).
 // @match        https://www.tousergo.com/*
@@ -4369,11 +4369,12 @@ https://www.tousergo.com`,
 
 // ============================================================================
 // MODULE : 8. DEV - Fiche Retour enrichie (infos commande/livraison depuis Odoo)
-// Sur la fiche "eggs.presta.retour" (Retour SC / SAV), affiche directement les
-// infos qu'on doit sinon aller chercher dans la commande + l'onglet Livraison :
-// date de commande, date de livraison, nb de jours écoulés depuis la livraison,
-// bouton suivi colis, adresse de livraison, avoir(s) déjà émis (+ statut de
-// remboursement), et les dernières notes internes de la commande d'origine.
+// Sur la fiche "eggs.presta.retour" (Retour SC / SAV), affiche une popup
+// flottante (même principe que la popup "Levée de fiche" : réduire / fermer)
+// avec les infos qu'on doit sinon aller chercher dans la commande + l'onglet
+// Livraison : date de commande, date de livraison, nb de jours écoulés depuis
+// la livraison, bouton suivi colis, adresse de livraison, avoir(s) déjà émis
+// (+ statut de remboursement), et les dernières notes de la commande d'origine.
 //
 // Noms de champs vérifiés le 22/07/2026 sur une vraie fiche retour + commande
 // (Odoo 13.0) :
@@ -4390,7 +4391,7 @@ https://www.tousergo.com`,
   if (location.hostname !== 'tousergo.eggs-solutions.fr') return;
 
   const ODOO_URL = 'https://tousergo.eggs-solutions.fr';
-  const PANEL_ID = 'te-retour-info-panel';
+  const PANEL_ID = 'te-rt-panel';
 
   // ------------------------------------------------------------
   // Petit wrapper JSON-RPC (même principe que les autres modules Odoo du
@@ -4547,9 +4548,9 @@ https://www.tousergo.com`,
   }
 
   // ------------------------------------------------------------
-  // Construction du HTML du panneau
+  // Construction du HTML du corps de la popup (sans l'en-tête, géré à part)
   // ------------------------------------------------------------
-  function buildPanelHtml({ order, shippingAddr, picking, refunds, messages }) {
+  function buildBodyHtml({ order, shippingAddr, picking, refunds, messages }) {
     const orderDate = fmtDatetime(order.date_order);
 
     let deliveryHtml;
@@ -4565,11 +4566,9 @@ https://www.tousergo.com`,
 
     let trackingHtml = '';
     if (picking && picking.carrier_tracking_url) {
-      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" rel="noopener"
-        style="display:inline-block;margin-top:4px;padding:3px 10px;background:#714B67;color:#fff;
-        border-radius:4px;text-decoration:none;font-size:12px;">📦 Voir le suivi colis</a>`;
+      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" rel="noopener" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
     } else if (picking && picking.carrier_tracking_ref) {
-      trackingHtml = `<span style="font-size:12px;color:#555;">N° suivi : ${escapeHtml(picking.carrier_tracking_ref)} (pas de lien direct)</span>`;
+      trackingHtml = `<span class="te-rt-track-ref">N° suivi : ${escapeHtml(picking.carrier_tracking_ref)} (pas de lien direct)</span>`;
     }
 
     let addrHtml = 'Adresse de livraison introuvable';
@@ -4585,12 +4584,12 @@ https://www.tousergo.com`,
 
     let refundsHtml;
     if (!refunds.length) {
-      refundsHtml = `<span style="color:#856404;">Aucun avoir trouvé sur cette commande — probablement pas encore remboursé.</span>`;
+      refundsHtml = `<span class="te-rt-warn">Aucun avoir trouvé sur cette commande — probablement pas encore remboursé.</span>`;
     } else {
       refundsHtml = refunds.map(r => {
         const color = REFUND_STATE_COLORS[r.invoice_payment_state] || '#6c757d';
-        return `<div style="margin-bottom:3px;">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:5px;"></span>
+        return `<div class="te-rt-refund-row">
+          <span class="te-rt-dot" style="background:${color};"></span>
           Avoir <strong>${escapeHtml(r.name)}</strong> du ${fmtDate(r.invoice_date)} —
           ${r.amount_total.toFixed(2)} € — état : ${escapeHtml(r.state)} — paiement : ${escapeHtml(r.invoice_payment_state || 'n/a')}
         </div>`;
@@ -4602,29 +4601,120 @@ https://www.tousergo.com`,
       const text = stripHtml(m.body);
       if (!text) return '';
       const author = m.author_id ? m.author_id[1] : 'Inconnu';
-      return `<div style="margin-bottom:4px;padding-left:6px;border-left:2px solid #ddd;">
-        <div style="font-size:11px;color:#888;">${fmtDatetime(m.date)} — ${escapeHtml(author)}</div>
+      return `<div class="te-rt-note">
+        <div class="te-rt-note-meta">${fmtDatetime(m.date)} — ${escapeHtml(author)}</div>
         <div>${escapeHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</div>
       </div>`;
     }).filter(Boolean);
     notesHtml = noteBlocks.length
       ? noteBlocks.join('')
-      : `<span style="color:#888;">Aucune note récente sur la commande.</span>`;
+      : `<span class="te-rt-warn" style="color:#888;">Aucune note récente sur la commande.</span>`;
 
     return `
-      <div style="border:1px solid #714B67;border-radius:6px;padding:10px 14px;margin:10px 0;
-        background:#faf8fa;font-size:13px;line-height:1.5;">
-        <div style="font-weight:bold;color:#714B67;margin-bottom:6px;">
-          🔎 Infos commande ${escapeHtml(order.name)} (TOUS ERGO)
-        </div>
-        <div>📅 Commande passée le <strong>${orderDate || 'inconnue'}</strong></div>
-        <div style="margin-top:2px;">${deliveryHtml}</div>
-        ${trackingHtml ? `<div>${trackingHtml}</div>` : ''}
-        <div style="margin-top:8px;"><strong>📍 Adresse de livraison</strong><br>${addrHtml}</div>
-        <div style="margin-top:8px;"><strong>💶 Avoir(s) / remboursement</strong><br>${refundsHtml}</div>
-        <div style="margin-top:8px;"><strong>📝 Dernières notes de la commande</strong>${notesHtml}</div>
-      </div>
+      <div class="te-rt-section">📅 Commande passée le <strong>${orderDate || 'inconnue'}</strong></div>
+      <div class="te-rt-section">${deliveryHtml}</div>
+      ${trackingHtml ? `<div class="te-rt-section">${trackingHtml}</div>` : ''}
+      <div class="te-rt-section"><strong>📍 Adresse de livraison</strong><br>${addrHtml}</div>
+      <div class="te-rt-section"><strong>💶 Avoir(s) / remboursement</strong><br>${refundsHtml}</div>
+      <div class="te-rt-section"><strong>📝 Dernières notes de la commande</strong>${notesHtml}</div>
     `;
+  }
+
+  // ------------------------------------------------------------
+  // Styles de la popup (même principe visuel que la popup "Levée de fiche" :
+  // panneau flottant, en-tête coloré avec boutons réduire/fermer).
+  // ------------------------------------------------------------
+  function ensureStyles() {
+    if (document.getElementById('te-rt-style')) return;
+    const style = document.createElement('style');
+    style.id = 'te-rt-style';
+    style.textContent = `
+      #${PANEL_ID} { position:fixed; top:130px; right:24px; width:340px; max-height:75vh;
+        background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
+        z-index:100000; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        display:flex; flex-direction:column; overflow:hidden; }
+      #${PANEL_ID}.te-rt-min { max-height:none; }
+      #${PANEL_ID}.te-rt-min .te-rt-body { display:none; }
+      #${PANEL_ID} .te-rt-head { background:#714B67; color:#fff; padding:10px 12px;
+        display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:default; flex-shrink:0; }
+      #${PANEL_ID} .te-rt-head b { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #${PANEL_ID} .te-rt-head-btns { display:flex; gap:4px; flex-shrink:0; }
+      #${PANEL_ID} .te-rt-iconbtn { cursor:pointer; color:#e6dde4; font-size:14px; line-height:1;
+        width:22px; height:22px; display:flex; align-items:center; justify-content:center;
+        border-radius:4px; border:none; background:transparent; }
+      #${PANEL_ID} .te-rt-iconbtn:hover { color:#fff; background:rgba(255,255,255,.15); }
+      #${PANEL_ID} .te-rt-body { overflow-y:auto; padding:10px 14px; }
+      #${PANEL_ID} .te-rt-section { margin-top:8px; }
+      #${PANEL_ID} .te-rt-section:first-child { margin-top:0; }
+      #${PANEL_ID} .te-rt-warn { color:#856404; }
+      #${PANEL_ID} .te-rt-track-btn { display:inline-block; padding:3px 10px; background:#714B67;
+        color:#fff; border-radius:4px; text-decoration:none; font-size:12px; }
+      #${PANEL_ID} .te-rt-track-ref { font-size:12px; color:#555; }
+      #${PANEL_ID} .te-rt-refund-row { margin-bottom:3px; }
+      #${PANEL_ID} .te-rt-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+      #${PANEL_ID} .te-rt-note { margin-bottom:4px; padding-left:6px; border-left:2px solid #ddd; }
+      #${PANEL_ID} .te-rt-note-meta { font-size:11px; color:#888; }
+      #${PANEL_ID} .te-rt-loading, #${PANEL_ID} .te-rt-error { padding:10px 14px; font-size:13px; }
+      #${PANEL_ID} .te-rt-error { color:#dc3545; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // ------------------------------------------------------------
+  // État réduit/fermé de la popup : "min" est une préférence globale
+  // (persistée pour la session d'onglet), "fermé" ne vaut que pour le
+  // retour actuellement affiché (rouvert automatiquement dès qu'on passe
+  // à une autre fiche retour).
+  // ------------------------------------------------------------
+  function isMinPref() {
+    return sessionStorage.getItem('te_rt_min') === '1';
+  }
+  function setMinPref(min) {
+    sessionStorage.setItem('te_rt_min', min ? '1' : '0');
+  }
+  const closedForId = new Set();
+
+  function getOrCreatePanel() {
+    ensureStyles();
+    let panel = document.getElementById(PANEL_ID);
+    if (panel) return panel;
+
+    panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    panel.innerHTML = `
+      <div class="te-rt-head">
+        <b id="te-rt-title">🔎 Infos commande</b>
+        <div class="te-rt-head-btns">
+          <button class="te-rt-iconbtn" data-action="min" type="button" title="Réduire / restaurer">—</button>
+          <button class="te-rt-iconbtn" data-action="close" type="button" title="Fermer">✕</button>
+        </div>
+      </div>
+      <div class="te-rt-body" id="te-rt-body"></div>
+    `;
+    document.body.appendChild(panel);
+
+    if (isMinPref()) panel.classList.add('te-rt-min');
+
+    panel.querySelector('[data-action="min"]').addEventListener('click', () => {
+      const nowMin = !panel.classList.contains('te-rt-min');
+      panel.classList.toggle('te-rt-min', nowMin);
+      setMinPref(nowMin);
+    });
+    panel.querySelector('[data-action="close"]').addEventListener('click', () => {
+      const id = getRetourIdFromHash();
+      if (id) closedForId.add(id);
+      panel.remove();
+    });
+    // Double-clic sur l'en-tête = raccourci pour réduire/restaurer (même
+    // principe que la popup Levée de fiche).
+    panel.querySelector('.te-rt-head').addEventListener('dblclick', (e) => {
+      if (e.target.closest('.te-rt-iconbtn')) return;
+      const nowMin = !panel.classList.contains('te-rt-min');
+      panel.classList.toggle('te-rt-min', nowMin);
+      setMinPref(nowMin);
+    });
+
+    return panel;
   }
 
   function removePanel() {
@@ -4632,37 +4722,24 @@ https://www.tousergo.com`,
     if (existing) existing.remove();
   }
 
-  function findInsertionPoint() {
-    // On tente plusieurs sélecteurs pour rester compatible avec différentes
-    // versions/vues d'Odoo. On insère juste avant la feuille du formulaire.
-    return document.querySelector('.o_form_sheet')
-      || document.querySelector('.o_form_view .o_content')
-      || document.querySelector('.o_content');
-  }
-
   async function renderPanel(retourId) {
-    const insertionPoint = findInsertionPoint();
-    if (!insertionPoint) return;
+    if (closedForId.has(retourId)) return;
 
-    removePanel();
-    const panel = document.createElement('div');
-    panel.id = PANEL_ID;
-    panel.dataset.retourId = String(retourId);
-    panel.innerHTML = `<div style="padding:8px;color:#714B67;font-size:13px;">🔎 Chargement des infos commande…</div>`;
-    insertionPoint.parentElement.insertBefore(panel, insertionPoint);
+    const panel = getOrCreatePanel();
+    const body = panel.querySelector('#te-rt-body');
+    body.innerHTML = `<div class="te-rt-loading">Chargement des infos commande…</div>`;
 
     try {
       const info = await fetchRetourInfo(retourId);
       // Le retour a pu changer pendant le chargement (navigation rapide) : on
       // vérifie qu'on affiche toujours la bonne fiche avant d'écrire le HTML.
-      if (getRetourIdFromHash() !== retourId) return;
-      panel.innerHTML = buildPanelHtml(info);
+      if (getRetourIdFromHash() !== retourId || closedForId.has(retourId)) return;
+      panel.querySelector('#te-rt-title').textContent = `🔎 ${info.order.name}`;
+      body.innerHTML = buildBodyHtml(info);
     } catch (e) {
       console.error('[TE-Retour] Erreur chargement infos', e);
-      if (getRetourIdFromHash() !== retourId) return;
-      panel.innerHTML = `<div style="padding:8px;color:#dc3545;font-size:13px;">
-        ⚠️ Impossible de charger les infos commande (${escapeHtml(e.message)}). Voir la console (F12) pour le détail.
-      </div>`;
+      if (getRetourIdFromHash() !== retourId || closedForId.has(retourId)) return;
+      body.innerHTML = `<div class="te-rt-error">⚠️ Impossible de charger les infos commande (${escapeHtml(e.message)}). Voir la console (F12) pour le détail.</div>`;
     }
   }
 
@@ -4690,7 +4767,7 @@ https://www.tousergo.com`,
       return;
     }
     if (id === lastRenderedId && document.getElementById(PANEL_ID)) return;
-    if (!findInsertionPoint()) return; // formulaire pas encore rendu, on retentera
+    if (!document.querySelector('.o_form_view')) return; // formulaire pas encore rendu, on retentera
     lastRenderedId = id;
     renderPanel(id);
   }
