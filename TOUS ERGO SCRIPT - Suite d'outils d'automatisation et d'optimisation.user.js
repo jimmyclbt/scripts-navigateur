@@ -4375,17 +4375,15 @@ https://www.tousergo.com`,
 // bouton suivi colis, adresse de livraison, avoir(s) déjà émis (+ statut de
 // remboursement), et les dernières notes internes de la commande d'origine.
 //
-// ⚠️ À VÉRIFIER PAR JIMMY (noms de champs techniques propres à l'instance) :
-//   - Le champ liant eggs.presta.retour -> sale.order est détecté automatiquement
-//     via fields_get (many2one dont relation = "sale.order"), donc pas besoin de
-//     le coder en dur. Si la détection échoue, le panneau affiche une erreur
-//     explicite et il suffit de forcer le nom dans FORCE_ORDER_FIELD ci-dessous.
-//   - Le lien retour <-> livraison (stock.picking) se fait par picking.origin =
-//     order.name (comportement standard Odoo). Si TOUS ERGO a un module qui
-//     nomme différemment le champ "origin", adapter PICKING_DOMAIN_EXTRA.
-//   - Les avoirs sont cherchés sur account.move avec type = "out_refund" (nom
-//     de champ valable en Odoo 13/14 : "type", renommé "move_type" en v15+).
-//     Si l'instance est en v15+, changer REFUND_TYPE_FIELD ci-dessous.
+// Noms de champs vérifiés le 22/07/2026 sur une vraie fiche retour + commande
+// (Odoo 13.0) :
+//   - eggs.presta.retour.order_id            -> many2one vers sale.order
+//   - sale.order.date_order                  -> date de la commande (Datetime)
+//   - sale.order.effective_date              -> date de livraison effective (Date)
+//   - sale.order.partner_shipping_id         -> adresse de livraison (res.partner)
+//   - sale.order.picking_ids                 -> one2many vers stock.picking
+//   - sale.order.invoice_ids                 -> one2many vers account.move (factures ET avoirs)
+//   - account.move.type = 'out_refund'       -> ce sont les avoirs
 // ============================================================================
 (function () {
   'use strict';
@@ -4393,13 +4391,6 @@ https://www.tousergo.com`,
 
   const ODOO_URL = 'https://tousergo.eggs-solutions.fr';
   const PANEL_ID = 'te-retour-info-panel';
-
-  // Forcer le nom technique du champ commande si la détection auto échoue
-  // (ex: 'id_commande', 'commande_id', 'sale_order_id'...). Laisser null
-  // pour garder la détection automatique.
-  const FORCE_ORDER_FIELD = null;
-  // Nom du champ type sur account.move ("type" en Odoo <=14, "move_type" en v15+)
-  const REFUND_TYPE_FIELD = 'type';
 
   // ------------------------------------------------------------
   // Petit wrapper JSON-RPC (même principe que les autres modules Odoo du
@@ -4436,29 +4427,6 @@ https://www.tousergo.com`,
     });
   }
 
-  // ------------------------------------------------------------
-  // Détection dynamique du champ many2one "commande" sur eggs.presta.retour,
-  // pour ne pas dépendre d'un nom codé en dur qui pourrait changer.
-  // ------------------------------------------------------------
-  let cachedOrderField = null;
-  async function getOrderFieldName() {
-    if (FORCE_ORDER_FIELD) return FORCE_ORDER_FIELD;
-    if (cachedOrderField) return cachedOrderField;
-    const fields = await odooCall('eggs.presta.retour', 'fields_get', [], {
-      attributes: ['type', 'relation'],
-    });
-    const candidate = Object.entries(fields).find(
-      ([, def]) => def.type === 'many2one' && def.relation === 'sale.order'
-    );
-    if (!candidate) {
-      throw new Error(
-        "Champ vers la commande introuvable sur eggs.presta.retour (renseigner FORCE_ORDER_FIELD dans le script)"
-      );
-    }
-    cachedOrderField = candidate[0];
-    return cachedOrderField;
-  }
-
   function getRetourIdFromHash() {
     const hash = location.hash.replace(/^#/, '');
     const params = new URLSearchParams(hash);
@@ -4467,22 +4435,32 @@ https://www.tousergo.com`,
     return id ? parseInt(id, 10) : null;
   }
 
-  function fmtDate(odooDatetime) {
-    if (!odooDatetime) return null;
-    // Odoo renvoie les datetimes en UTC, format "YYYY-MM-DD HH:MM:SS"
-    const iso = odooDatetime.replace(' ', 'T') + 'Z';
-    const d = new Date(iso);
-    if (isNaN(d)) return odooDatetime;
+  // Champ Datetime Odoo ("YYYY-MM-DD HH:MM:SS", UTC) -> affichage FR avec heure
+  function fmtDatetime(odooValue) {
+    if (!odooValue) return null;
+    const d = new Date(odooValue.replace(' ', 'T') + 'Z');
+    if (isNaN(d)) return odooValue;
     return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
       ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   }
 
-  function daysSince(odooDatetime) {
-    if (!odooDatetime) return null;
-    const iso = odooDatetime.replace(' ', 'T') + 'Z';
-    const d = new Date(iso);
-    if (isNaN(d)) return null;
-    return Math.floor((Date.now() - d.getTime()) / 86400000);
+  // Champ Date Odoo ("YYYY-MM-DD", sans heure) -> affichage FR sans heure
+  function fmtDate(odooValue) {
+    if (!odooValue) return null;
+    const [y, m, d] = odooValue.split('-');
+    if (!y || !m || !d) return odooValue;
+    return `${d}/${m}/${y}`;
+  }
+
+  // Nombre de jours écoulés depuis une date Odoo "YYYY-MM-DD" (minuit local)
+  function daysSinceDate(odooDateValue) {
+    if (!odooDateValue) return null;
+    const [y, m, d] = odooDateValue.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const then = new Date(y, m - 1, d);
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((todayMidnight - then) / 86400000);
   }
 
   function stripHtml(html) {
@@ -4506,14 +4484,14 @@ https://www.tousergo.com`,
   // Récupération de toutes les données pour un retour donné.
   // ------------------------------------------------------------
   async function fetchRetourInfo(retourId) {
-    const orderField = await getOrderFieldName();
-    const [retour] = await odooCall('eggs.presta.retour', 'read', [[retourId], [orderField]]);
-    const orderRel = retour ? retour[orderField] : null;
+    const [retour] = await odooCall('eggs.presta.retour', 'read', [[retourId], ['order_id']]);
+    const orderRel = retour ? retour.order_id : null;
     const orderId = Array.isArray(orderRel) ? orderRel[0] : orderRel;
-    if (!orderId) throw new Error('Commande introuvable sur ce retour (champ vide)');
+    if (!orderId) throw new Error("Ce retour n'est rattaché à aucune commande");
 
     const [order] = await odooCall('sale.order', 'read', [
-      [orderId], ['name', 'date_order', 'partner_shipping_id'],
+      [orderId],
+      ['name', 'date_order', 'effective_date', 'partner_shipping_id', 'picking_ids', 'invoice_ids'],
     ]);
 
     let shippingAddr = null;
@@ -4525,28 +4503,33 @@ https://www.tousergo.com`,
     }
 
     let picking = null;
-    try {
-      const pickings = await odooCall('stock.picking', 'search_read', [
-        [['origin', '=', order.name], ['picking_type_id.code', '=', 'outgoing']],
-      ], {
-        fields: ['state', 'date_done', 'carrier_tracking_ref', 'carrier_tracking_url'],
-        order: 'date_done desc', limit: 1,
-      });
-      picking = pickings[0] || null;
-    } catch (e) {
-      console.warn('[TE-Retour] Lecture livraison impossible', e);
+    if (order.picking_ids && order.picking_ids.length) {
+      try {
+        const pickings = await odooCall('stock.picking', 'read', [
+          order.picking_ids,
+          ['state', 'date_done', 'carrier_tracking_ref', 'carrier_tracking_url'],
+        ]);
+        // On privilégie le colis effectivement livré le plus récemment ; à
+        // défaut, celui qui a une date_done ; à défaut, le premier de la liste.
+        picking = pickings.find(p => p.state === 'done' && p.date_done)
+          || pickings.find(p => p.date_done)
+          || pickings[0];
+      } catch (e) {
+        console.warn('[TE-Retour] Lecture livraison impossible', e);
+      }
     }
 
     let refunds = [];
-    try {
-      refunds = await odooCall('account.move', 'search_read', [
-        [['invoice_origin', '=', order.name], [REFUND_TYPE_FIELD, '=', 'out_refund']],
-      ], {
-        fields: ['name', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
-        order: 'invoice_date desc',
-      });
-    } catch (e) {
-      console.warn('[TE-Retour] Lecture avoirs impossible', e);
+    if (order.invoice_ids && order.invoice_ids.length) {
+      try {
+        const moves = await odooCall('account.move', 'read', [
+          order.invoice_ids,
+          ['name', 'type', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
+        ]);
+        refunds = moves.filter(m => m.type === 'out_refund');
+      } catch (e) {
+        console.warn('[TE-Retour] Lecture avoirs impossible', e);
+      }
     }
 
     let messages = [];
@@ -4567,17 +4550,17 @@ https://www.tousergo.com`,
   // Construction du HTML du panneau
   // ------------------------------------------------------------
   function buildPanelHtml({ order, shippingAddr, picking, refunds, messages }) {
-    const orderDate = fmtDate(order.date_order);
+    const orderDate = fmtDatetime(order.date_order);
 
     let deliveryHtml;
-    if (picking && picking.date_done) {
-      const nbJours = daysSince(picking.date_done);
-      deliveryHtml = `📅 Livrée le <strong>${fmtDate(picking.date_done)}</strong>` +
-        ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis la livraison`;
+    if (order.effective_date) {
+      const nbJours = daysSinceDate(order.effective_date);
+      deliveryHtml = `📅 Livrée le <strong>${fmtDate(order.effective_date)}</strong>` +
+        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis la livraison` : '');
     } else if (picking) {
-      deliveryHtml = `🚚 Livraison non terminée (statut : ${escapeHtml(picking.state)})`;
+      deliveryHtml = `🚚 Pas encore livrée (statut du colis : ${escapeHtml(picking.state)})`;
     } else {
-      deliveryHtml = `🚚 Aucun bon de livraison trouvé pour cette commande`;
+      deliveryHtml = `🚚 Aucune livraison enregistrée pour cette commande`;
     }
 
     let trackingHtml = '';
@@ -4615,19 +4598,18 @@ https://www.tousergo.com`,
     }
 
     let notesHtml;
-    if (!messages.length) {
-      notesHtml = `<span style="color:#888;">Aucune note récente sur la commande.</span>`;
-    } else {
-      notesHtml = messages.map(m => {
-        const text = stripHtml(m.body);
-        if (!text) return '';
-        const author = m.author_id ? m.author_id[1] : 'Inconnu';
-        return `<div style="margin-bottom:4px;padding-left:6px;border-left:2px solid #ddd;">
-          <div style="font-size:11px;color:#888;">${fmtDate(m.date)} — ${escapeHtml(author)}</div>
-          <div>${escapeHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</div>
-        </div>`;
-      }).join('') || `<span style="color:#888;">Aucune note texte récente sur la commande.</span>`;
-    }
+    const noteBlocks = messages.map(m => {
+      const text = stripHtml(m.body);
+      if (!text) return '';
+      const author = m.author_id ? m.author_id[1] : 'Inconnu';
+      return `<div style="margin-bottom:4px;padding-left:6px;border-left:2px solid #ddd;">
+        <div style="font-size:11px;color:#888;">${fmtDatetime(m.date)} — ${escapeHtml(author)}</div>
+        <div>${escapeHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</div>
+      </div>`;
+    }).filter(Boolean);
+    notesHtml = noteBlocks.length
+      ? noteBlocks.join('')
+      : `<span style="color:#888;">Aucune note récente sur la commande.</span>`;
 
     return `
       <div style="border:1px solid #714B67;border-radius:6px;padding:10px 14px;margin:10px 0;
