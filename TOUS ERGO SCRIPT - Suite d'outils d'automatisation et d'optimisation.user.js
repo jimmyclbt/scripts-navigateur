@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      3.4
+// @version      3.5
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -26,7 +26,6 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_addValueChangeListener
-// @grant        GM_closeTab
 // @grant        GM_registerMenuCommand
 // @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
 // @updateURL    https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
@@ -3392,12 +3391,11 @@ https://www.tousergo.com`,
 
           // Petite pause pour laisser le temps de voir/lire le message si besoin
           setTimeout(() => {
-              try {
-                  GM_closeTab();
-              } catch (e) {
-                  // Fallback si GM_closeTab n'est pas disponible pour une raison quelconque
-                  window.close();
-              }
+              // Note : GM_closeTab n'existe pas dans l'API Tampermonkey (constaté
+              // le 22/07/2026) — seule la fonction standard window.close() existe,
+              // et elle ne fonctionne que si CET onglet a été ouvert par du script
+              // (window.open), pas par une navigation externe.
+              window.close();
           }, 800);
       }
 
@@ -4380,19 +4378,26 @@ https://www.tousergo.com`,
         openedFromLdfLink = true;
         const heartbeatAge = Date.now() - GM_getValue(LDF_HEARTBEAT_KEY, 0);
         const alive = heartbeatAge < HEARTBEAT_STALE_MS;
-        console.log('[LeveeDeFiche][DIAG] Nouvel appel', urlPhone, '— dernier battement il y a', heartbeatAge, 'ms — considéré actif :', alive, '(script v3.4)');
         if (alive) {
           // Un onglet TOUS ERGO est déjà ouvert quelque part : on lui
           // transmet l'appel via le stockage partagé (il l'affichera
-          // automatiquement via la synchro ci-dessous), puis on referme cet
-          // onglet fraîchement ouvert par 3CX — il ne sert plus à rien.
+          // automatiquement via la synchro ci-dessous). On tente de fermer
+          // cet onglet, mais Chrome refuse par sécurité qu'un script ferme
+          // un onglet qu'il n'a pas lui-même ouvert (ce qui est le cas ici,
+          // 3CX l'ayant ouvert via une navigation externe) — donc dans la
+          // pratique, ça ne fermera l'onglet que rarement. On affiche un
+          // message clair pour que l'agent sache qu'il peut le fermer.
           saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
-          try { GM_closeTab(); console.log('[LeveeDeFiche][DIAG] GM_closeTab() appelé sans exception'); } catch (e) { console.warn('[LeveeDeFiche][DIAG] GM_closeTab() a levé une erreur :', e); }
-          // Filet de sécurité : si la fermeture n'a pas eu lieu (refusée par
-          // le navigateur), on affiche quand même la bulle ICI plutôt que
-          // de laisser l'agent face à un onglet vide.
-          await new Promise((r) => setTimeout(r, 700));
-          console.log('[LeveeDeFiche][DIAG] Toujours là 700ms après GM_closeTab() : la fermeture a donc échoué.');
+          try { window.close(); } catch (e) { /* ignore */ }
+          await new Promise((r) => setTimeout(r, 300));
+          const bodyEl = document.body;
+          if (bodyEl) {
+            const msg = document.createElement('div');
+            msg.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;background:#714B67;color:#fff;padding:10px 14px;border-radius:8px;font:13px/1.4 sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:280px;';
+            msg.textContent = 'La fiche client s\'affiche déjà dans un autre onglet. Vous pouvez fermer celui-ci.';
+            bodyEl.appendChild(msg);
+          }
+          return;
         }
       }
 
