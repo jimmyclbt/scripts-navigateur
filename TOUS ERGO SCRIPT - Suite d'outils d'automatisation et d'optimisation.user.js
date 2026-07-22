@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      1.5
+// @version      1.6
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX).
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX), fiche Retour enrichie (infos commande/livraison).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
 // @match        https://sellercentral-europe.amazon.com/*
 // @match        https://adeo-marketplace.mirakl.net/*
 // @match        https://tousergo.eggs-solutions.fr/synchro_commande*
+// @match        https://tousergo.eggs-solutions.fr/web*
 // @connect      tousergo.eggs-solutions.fr
 // @connect      www.tousergo.com
 // @connect      logic.azure.com
@@ -45,6 +46,7 @@
  *   5. DEV - Lien cliquable référence Odoo
  *   6. DEV - Fermeture auto onglet après synchro réussie
  *   7. DEV - Levée de fiche téléphone (3CX -> recherche client PrestaShop)
+ *   8. DEV - Fiche Retour enrichie (infos commande/livraison depuis Odoo)
  * ============================================================================
  */
 
@@ -4362,4 +4364,356 @@ https://www.tousergo.com`,
 
     initLeveeDeFiche();
   })();
+})();
+
+
+// ============================================================================
+// MODULE : 8. DEV - Fiche Retour enrichie (infos commande/livraison depuis Odoo)
+// Sur la fiche "eggs.presta.retour" (Retour SC / SAV), affiche directement les
+// infos qu'on doit sinon aller chercher dans la commande + l'onglet Livraison :
+// date de commande, date de livraison, nb de jours écoulés depuis la livraison,
+// bouton suivi colis, adresse de livraison, avoir(s) déjà émis (+ statut de
+// remboursement), et les dernières notes internes de la commande d'origine.
+//
+// ⚠️ À VÉRIFIER PAR JIMMY (noms de champs techniques propres à l'instance) :
+//   - Le champ liant eggs.presta.retour -> sale.order est détecté automatiquement
+//     via fields_get (many2one dont relation = "sale.order"), donc pas besoin de
+//     le coder en dur. Si la détection échoue, le panneau affiche une erreur
+//     explicite et il suffit de forcer le nom dans FORCE_ORDER_FIELD ci-dessous.
+//   - Le lien retour <-> livraison (stock.picking) se fait par picking.origin =
+//     order.name (comportement standard Odoo). Si TOUS ERGO a un module qui
+//     nomme différemment le champ "origin", adapter PICKING_DOMAIN_EXTRA.
+//   - Les avoirs sont cherchés sur account.move avec type = "out_refund" (nom
+//     de champ valable en Odoo 13/14 : "type", renommé "move_type" en v15+).
+//     Si l'instance est en v15+, changer REFUND_TYPE_FIELD ci-dessous.
+// ============================================================================
+(function () {
+  'use strict';
+  if (location.hostname !== 'tousergo.eggs-solutions.fr') return;
+
+  const ODOO_URL = 'https://tousergo.eggs-solutions.fr';
+  const PANEL_ID = 'te-retour-info-panel';
+
+  // Forcer le nom technique du champ commande si la détection auto échoue
+  // (ex: 'id_commande', 'commande_id', 'sale_order_id'...). Laisser null
+  // pour garder la détection automatique.
+  const FORCE_ORDER_FIELD = null;
+  // Nom du champ type sur account.move ("type" en Odoo <=14, "move_type" en v15+)
+  const REFUND_TYPE_FIELD = 'type';
+
+  // ------------------------------------------------------------
+  // Petit wrapper JSON-RPC (même principe que les autres modules Odoo du
+  // script : la session du navigateur est déjà active, pas besoin de se
+  // ré-authentifier ici).
+  // ------------------------------------------------------------
+  function odooCall(model, method, args, kwargs) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${ODOO_URL}/web/dataset/call_kw`,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'call',
+          params: { model, method, args: args || [], kwargs: kwargs || {} },
+          id: Math.floor(Math.random() * 1000000),
+        }),
+        onload: (res) => {
+          try {
+            const data = JSON.parse(res.responseText);
+            if (data.error) {
+              console.warn('[TE-Retour] Erreur Odoo', model, method, data.error);
+              reject(new Error(data.error.data?.message || data.error.message || 'Erreur Odoo'));
+              return;
+            }
+            resolve(data.result);
+          } catch (e) {
+            reject(e);
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau Odoo')),
+      });
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Détection dynamique du champ many2one "commande" sur eggs.presta.retour,
+  // pour ne pas dépendre d'un nom codé en dur qui pourrait changer.
+  // ------------------------------------------------------------
+  let cachedOrderField = null;
+  async function getOrderFieldName() {
+    if (FORCE_ORDER_FIELD) return FORCE_ORDER_FIELD;
+    if (cachedOrderField) return cachedOrderField;
+    const fields = await odooCall('eggs.presta.retour', 'fields_get', [], {
+      attributes: ['type', 'relation'],
+    });
+    const candidate = Object.entries(fields).find(
+      ([, def]) => def.type === 'many2one' && def.relation === 'sale.order'
+    );
+    if (!candidate) {
+      throw new Error(
+        "Champ vers la commande introuvable sur eggs.presta.retour (renseigner FORCE_ORDER_FIELD dans le script)"
+      );
+    }
+    cachedOrderField = candidate[0];
+    return cachedOrderField;
+  }
+
+  function getRetourIdFromHash() {
+    const hash = location.hash.replace(/^#/, '');
+    const params = new URLSearchParams(hash);
+    if (params.get('model') !== 'eggs.presta.retour') return null;
+    const id = params.get('id');
+    return id ? parseInt(id, 10) : null;
+  }
+
+  function fmtDate(odooDatetime) {
+    if (!odooDatetime) return null;
+    // Odoo renvoie les datetimes en UTC, format "YYYY-MM-DD HH:MM:SS"
+    const iso = odooDatetime.replace(' ', 'T') + 'Z';
+    const d = new Date(iso);
+    if (isNaN(d)) return odooDatetime;
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+      ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function daysSince(odooDatetime) {
+    if (!odooDatetime) return null;
+    const iso = odooDatetime.replace(' ', 'T') + 'Z';
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
+  }
+
+  function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html || '';
+    return (div.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+  }
+
+  const REFUND_STATE_COLORS = {
+    paid: '#28a745', in_payment: '#ffc107', not_paid: '#dc3545',
+    partial: '#ffc107', reversed: '#6c757d',
+  };
+
+  // ------------------------------------------------------------
+  // Récupération de toutes les données pour un retour donné.
+  // ------------------------------------------------------------
+  async function fetchRetourInfo(retourId) {
+    const orderField = await getOrderFieldName();
+    const [retour] = await odooCall('eggs.presta.retour', 'read', [[retourId], [orderField]]);
+    const orderRel = retour ? retour[orderField] : null;
+    const orderId = Array.isArray(orderRel) ? orderRel[0] : orderRel;
+    if (!orderId) throw new Error('Commande introuvable sur ce retour (champ vide)');
+
+    const [order] = await odooCall('sale.order', 'read', [
+      [orderId], ['name', 'date_order', 'partner_shipping_id'],
+    ]);
+
+    let shippingAddr = null;
+    if (order.partner_shipping_id) {
+      const [addr] = await odooCall('res.partner', 'read', [
+        [order.partner_shipping_id[0]], ['name', 'street', 'street2', 'zip', 'city', 'country_id', 'phone'],
+      ]);
+      shippingAddr = addr;
+    }
+
+    let picking = null;
+    try {
+      const pickings = await odooCall('stock.picking', 'search_read', [
+        [['origin', '=', order.name], ['picking_type_id.code', '=', 'outgoing']],
+      ], {
+        fields: ['state', 'date_done', 'carrier_tracking_ref', 'carrier_tracking_url'],
+        order: 'date_done desc', limit: 1,
+      });
+      picking = pickings[0] || null;
+    } catch (e) {
+      console.warn('[TE-Retour] Lecture livraison impossible', e);
+    }
+
+    let refunds = [];
+    try {
+      refunds = await odooCall('account.move', 'search_read', [
+        [['invoice_origin', '=', order.name], [REFUND_TYPE_FIELD, '=', 'out_refund']],
+      ], {
+        fields: ['name', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
+        order: 'invoice_date desc',
+      });
+    } catch (e) {
+      console.warn('[TE-Retour] Lecture avoirs impossible', e);
+    }
+
+    let messages = [];
+    try {
+      messages = await odooCall('mail.message', 'search_read', [
+        [['model', '=', 'sale.order'], ['res_id', '=', orderId], ['message_type', '=', 'comment']],
+      ], {
+        fields: ['body', 'date', 'author_id'], order: 'date desc', limit: 3,
+      });
+    } catch (e) {
+      console.warn('[TE-Retour] Lecture notes impossible', e);
+    }
+
+    return { order, shippingAddr, picking, refunds, messages };
+  }
+
+  // ------------------------------------------------------------
+  // Construction du HTML du panneau
+  // ------------------------------------------------------------
+  function buildPanelHtml({ order, shippingAddr, picking, refunds, messages }) {
+    const orderDate = fmtDate(order.date_order);
+
+    let deliveryHtml;
+    if (picking && picking.date_done) {
+      const nbJours = daysSince(picking.date_done);
+      deliveryHtml = `📅 Livrée le <strong>${fmtDate(picking.date_done)}</strong>` +
+        ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis la livraison`;
+    } else if (picking) {
+      deliveryHtml = `🚚 Livraison non terminée (statut : ${escapeHtml(picking.state)})`;
+    } else {
+      deliveryHtml = `🚚 Aucun bon de livraison trouvé pour cette commande`;
+    }
+
+    let trackingHtml = '';
+    if (picking && picking.carrier_tracking_url) {
+      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" rel="noopener"
+        style="display:inline-block;margin-top:4px;padding:3px 10px;background:#714B67;color:#fff;
+        border-radius:4px;text-decoration:none;font-size:12px;">📦 Voir le suivi colis</a>`;
+    } else if (picking && picking.carrier_tracking_ref) {
+      trackingHtml = `<span style="font-size:12px;color:#555;">N° suivi : ${escapeHtml(picking.carrier_tracking_ref)} (pas de lien direct)</span>`;
+    }
+
+    let addrHtml = 'Adresse de livraison introuvable';
+    if (shippingAddr) {
+      const parts = [
+        shippingAddr.name, shippingAddr.street, shippingAddr.street2,
+        [shippingAddr.zip, shippingAddr.city].filter(Boolean).join(' '),
+        shippingAddr.country_id ? shippingAddr.country_id[1] : null,
+      ].filter(Boolean).map(escapeHtml);
+      addrHtml = parts.join('<br>');
+      if (shippingAddr.phone) addrHtml += `<br>☎ ${escapeHtml(shippingAddr.phone)}`;
+    }
+
+    let refundsHtml;
+    if (!refunds.length) {
+      refundsHtml = `<span style="color:#856404;">Aucun avoir trouvé sur cette commande — probablement pas encore remboursé.</span>`;
+    } else {
+      refundsHtml = refunds.map(r => {
+        const color = REFUND_STATE_COLORS[r.invoice_payment_state] || '#6c757d';
+        return `<div style="margin-bottom:3px;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:5px;"></span>
+          Avoir <strong>${escapeHtml(r.name)}</strong> du ${fmtDate(r.invoice_date)} —
+          ${r.amount_total.toFixed(2)} € — état : ${escapeHtml(r.state)} — paiement : ${escapeHtml(r.invoice_payment_state || 'n/a')}
+        </div>`;
+      }).join('');
+    }
+
+    let notesHtml;
+    if (!messages.length) {
+      notesHtml = `<span style="color:#888;">Aucune note récente sur la commande.</span>`;
+    } else {
+      notesHtml = messages.map(m => {
+        const text = stripHtml(m.body);
+        if (!text) return '';
+        const author = m.author_id ? m.author_id[1] : 'Inconnu';
+        return `<div style="margin-bottom:4px;padding-left:6px;border-left:2px solid #ddd;">
+          <div style="font-size:11px;color:#888;">${fmtDate(m.date)} — ${escapeHtml(author)}</div>
+          <div>${escapeHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</div>
+        </div>`;
+      }).join('') || `<span style="color:#888;">Aucune note texte récente sur la commande.</span>`;
+    }
+
+    return `
+      <div style="border:1px solid #714B67;border-radius:6px;padding:10px 14px;margin:10px 0;
+        background:#faf8fa;font-size:13px;line-height:1.5;">
+        <div style="font-weight:bold;color:#714B67;margin-bottom:6px;">
+          🔎 Infos commande ${escapeHtml(order.name)} (TOUS ERGO)
+        </div>
+        <div>📅 Commande passée le <strong>${orderDate || 'inconnue'}</strong></div>
+        <div style="margin-top:2px;">${deliveryHtml}</div>
+        ${trackingHtml ? `<div>${trackingHtml}</div>` : ''}
+        <div style="margin-top:8px;"><strong>📍 Adresse de livraison</strong><br>${addrHtml}</div>
+        <div style="margin-top:8px;"><strong>💶 Avoir(s) / remboursement</strong><br>${refundsHtml}</div>
+        <div style="margin-top:8px;"><strong>📝 Dernières notes de la commande</strong>${notesHtml}</div>
+      </div>
+    `;
+  }
+
+  function removePanel() {
+    const existing = document.getElementById(PANEL_ID);
+    if (existing) existing.remove();
+  }
+
+  function findInsertionPoint() {
+    // On tente plusieurs sélecteurs pour rester compatible avec différentes
+    // versions/vues d'Odoo. On insère juste avant la feuille du formulaire.
+    return document.querySelector('.o_form_sheet')
+      || document.querySelector('.o_form_view .o_content')
+      || document.querySelector('.o_content');
+  }
+
+  async function renderPanel(retourId) {
+    const insertionPoint = findInsertionPoint();
+    if (!insertionPoint) return;
+
+    removePanel();
+    const panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    panel.dataset.retourId = String(retourId);
+    panel.innerHTML = `<div style="padding:8px;color:#714B67;font-size:13px;">🔎 Chargement des infos commande…</div>`;
+    insertionPoint.parentElement.insertBefore(panel, insertionPoint);
+
+    try {
+      const info = await fetchRetourInfo(retourId);
+      // Le retour a pu changer pendant le chargement (navigation rapide) : on
+      // vérifie qu'on affiche toujours la bonne fiche avant d'écrire le HTML.
+      if (getRetourIdFromHash() !== retourId) return;
+      panel.innerHTML = buildPanelHtml(info);
+    } catch (e) {
+      console.error('[TE-Retour] Erreur chargement infos', e);
+      if (getRetourIdFromHash() !== retourId) return;
+      panel.innerHTML = `<div style="padding:8px;color:#dc3545;font-size:13px;">
+        ⚠️ Impossible de charger les infos commande (${escapeHtml(e.message)}). Voir la console (F12) pour le détail.
+      </div>`;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Boucle de détection : la page Odoo est une SPA (navigation par hash),
+  // donc on surveille à la fois les changements de hash (pager, ouverture
+  // d'une autre fiche) et le rendu DOM (chargement initial différé).
+  // ------------------------------------------------------------
+  let lastRenderedId = null;
+  let renderScheduled = false;
+
+  function scheduleTryRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    setTimeout(() => {
+      renderScheduled = false;
+      tryRender();
+    }, 250);
+  }
+
+  function tryRender() {
+    const id = getRetourIdFromHash();
+    if (!id) {
+      if (lastRenderedId !== null) { removePanel(); lastRenderedId = null; }
+      return;
+    }
+    if (id === lastRenderedId && document.getElementById(PANEL_ID)) return;
+    if (!findInsertionPoint()) return; // formulaire pas encore rendu, on retentera
+    lastRenderedId = id;
+    renderPanel(id);
+  }
+
+  new MutationObserver(scheduleTryRender).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('hashchange', () => { lastRenderedId = null; scheduleTryRender(); });
+  scheduleTryRender();
 })();
