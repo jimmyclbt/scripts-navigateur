@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      1.7
+// @version      2.2
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone (3CX), fiche Retour enrichie (infos commande/livraison).
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante multi-onglets (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
@@ -16,11 +16,16 @@
 // @connect      logic.azure.com
 // @connect      azure-apim.net
 // @connect      environment.api.powerplatform.com
+// @connect      www.chronopost.fr
+// @connect      www.laposte.fr
+// @connect      public.infra-prod.prod.cloud.fr.gls-group.com
+// @connect      mykn.kuehne-nagel.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setClipboard
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
 // @grant        GM_closeTab
 // @grant        GM_registerMenuCommand
 // @downloadURL  https://github.com/jimmyclbt/scripts-navigateur/raw/refs/heads/main/TOUS%20ERGO%20SCRIPT%20-%20Suite%20d'outils%20d'automatisation%20et%20d'optimisation.user.js
@@ -45,7 +50,7 @@
  *   4. DEV - Bouton Crisp vers Prestashop
  *   5. DEV - Lien cliquable référence Odoo
  *   6. DEV - Fermeture auto onglet après synchro réussie
- *   7. DEV - Levée de fiche téléphone (3CX -> recherche client PrestaShop)
+ *   7. DEV - Levée de fiche téléphone flottante multi-onglets (3CX -> recherche client PrestaShop)
  *   8. DEV - Fiche Retour enrichie (infos commande/livraison depuis Odoo)
  * ============================================================================
  */
@@ -3430,16 +3435,31 @@ https://www.tousergo.com`,
 // MODULE : 7. DEV - Levée de fiche téléphone (3CX -> recherche client PrestaShop)
 // Se déclenche uniquement si l'URL contient ?ldf_phone=... (paramètre ouvert
 // par la config "screen pop" de 3CX au décrochage d'un appel).
+//
+// Depuis la v1.8 : bulle flottante PARTAGÉE ENTRE ONGLETS. Si un onglet
+// TOUS ERGO affiche déjà la bulle (Crisp, Amazon, Odoo, PrestaShop...),
+// l'onglet fraîchement ouvert par 3CX se referme automatiquement et
+// transmet l'appel à l'onglet déjà ouvert, plutôt que d'empiler les onglets.
 // ============================================================================
 (function () {
   'use strict';
-  // Garde de site : back-office PrestaShop uniquement. Le menu de config de
-  // la clé doit être dispo même sans paramètre ldf_phone dans l'URL —
-  // la recherche automatique, elle, ne se lance que si ldf_phone est présent.
-  // Fonctionne sur le back-office ET sur le site public (www.tousergo.com) —
-  // la levée de fiche 3CX peut désormais pointer vers le site public pour
-  // que l'agent garde le site client sous le panneau, réductible à tout moment.
-  if (location.hostname !== 'www.tousergo.com') return;
+  // Garde de site : liste des domaines "poste de travail agent" où la bulle
+  // flottante doit pouvoir apparaître (pas seulement PrestaShop). Le but :
+  // quel que soit l'onglet actif au moment de l'appel (Crisp, Amazon, Odoo…),
+  // la fiche client reste visible sans avoir à rouvrir/rechercher quoi que
+  // ce soit. Étendre cette liste = ajouter aussi la ligne @match correspondante
+  // en haut du script (sinon Tampermonkey ne charge même pas le script dessus).
+  const LDF_HOSTS = new Set([
+    'www.tousergo.com',
+    'app.crisp.chat',
+    'sellercentral.amazon.fr',
+    'sellercentral-europe.amazon.com',
+    'adeo-marketplace.mirakl.net',
+    'tousergo.eggs-solutions.fr',
+    // 'tousergo.zendesk.com', // TODO Jimmy : à activer ici + en @match une
+    // fois le sous-domaine Zendesk définitif confirmé (migration en cours).
+  ]);
+  if (!LDF_HOSTS.has(location.hostname)) return;
   const ldfParams = new URLSearchParams(location.search);
 
   (function () {
@@ -4073,6 +4093,7 @@ https://www.tousergo.com`,
           <div class="te-ldf-body" id="te-ldf-body"></div>`;
         document.body.appendChild(panel);
         setPanelState(panel, initialState || 'normal');
+        startHeartbeat(); // cet onglet devient l'hôte tant que la bulle est affichée
 
         function persistState(state) {
           const session = loadLdfSession();
@@ -4083,7 +4104,8 @@ https://www.tousergo.com`,
           const backdrop = document.getElementById('te-ldf-backdrop');
           if (backdrop) backdrop.remove();
           panel.remove();
-          clearLdfSession(); // Fin de la levée de fiche : ne réapparaît plus sur les pages suivantes.
+          stopHeartbeat();
+          clearLdfSession(); // Fin de la levée de fiche : ferme la bulle sur TOUS les onglets ouverts.
         });
         panel.querySelector('[data-action="min"]').addEventListener('click', () => {
           const next = panel.dataset.state === 'min' ? 'normal' : 'min';
@@ -4255,23 +4277,46 @@ https://www.tousergo.com`,
     }
 
     // ------------------------------------------------------------
-    // Persistance pendant la navigation (sessionStorage = survit aux
-    // changements de page dans le même onglet, disparaît si l'onglet
-    // se ferme — ne se mélange pas entre plusieurs onglets/agents).
+    // Persistance PARTAGÉE ENTRE ONGLETS (GM_setValue/GM_getValue — contrairement
+    // à sessionStorage, ce stockage est commun à tous les onglets où le script
+    // tourne, quel que soit le site). Couplé à GM_addValueChangeListener, ça
+    // permet à la bulle de rester visible sur n'importe quel onglet déjà ouvert
+    // (Crisp, Amazon, Odoo…) sans avoir à en rouvrir un nouveau à chaque appel.
     // ------------------------------------------------------------
     const LDF_SESSION_KEY = 'te_ldf_session_v1';
+    const LDF_HEARTBEAT_KEY = 'te_ldf_heartbeat_v1';
+    const HEARTBEAT_INTERVAL_MS = 2000;
+    const HEARTBEAT_STALE_MS = 4000;
 
     function saveLdfSession(data) {
-      try { sessionStorage.setItem(LDF_SESSION_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+      try { GM_setValue(LDF_SESSION_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
     }
     function loadLdfSession() {
       try {
-        const raw = sessionStorage.getItem(LDF_SESSION_KEY);
+        const raw = GM_getValue(LDF_SESSION_KEY, '');
         return raw ? JSON.parse(raw) : null;
       } catch (e) { return null; }
     }
     function clearLdfSession() {
-      try { sessionStorage.removeItem(LDF_SESSION_KEY); } catch (e) { /* ignore */ }
+      try { GM_deleteValue(LDF_SESSION_KEY); } catch (e) { /* ignore */ }
+    }
+
+    // "Battement de cœur" : l'onglet qui affiche actuellement la bulle
+    // (l'hôte) signale toutes les 2s qu'il est vivant. Un nouvel onglet
+    // ouvert par 3CX vérifie ce battement avant de s'afficher : s'il est
+    // récent, un hôte existe déjà quelque part -> pas besoin d'un 2e onglet.
+    let heartbeatTimer = null;
+    function startHeartbeat() {
+      if (heartbeatTimer) return;
+      GM_setValue(LDF_HEARTBEAT_KEY, Date.now());
+      heartbeatTimer = setInterval(() => GM_setValue(LDF_HEARTBEAT_KEY, Date.now()), HEARTBEAT_INTERVAL_MS);
+    }
+    function stopHeartbeat() {
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    }
+    function anotherTabIsAlive() {
+      const last = GM_getValue(LDF_HEARTBEAT_KEY, 0);
+      return (Date.now() - last) < HEARTBEAT_STALE_MS;
     }
 
     // Enrichit chaque client en arrière-plan (groupe + commandes) et met à
@@ -4315,8 +4360,18 @@ https://www.tousergo.com`,
       let cachedCustomers = null;
 
       if (urlPhone) {
-        // Nouvel appel 3CX : on démarre une session fraîche, même si une
-        // ancienne était encore active (nouvel appel = nouvelle fiche).
+        if (anotherTabIsAlive()) {
+          // Un onglet TOUS ERGO affiche déjà la bulle quelque part (Crisp,
+          // Odoo, Amazon…) : on lui transmet le nouvel appel via le stockage
+          // partagé, puis on referme cet onglet fraîchement ouvert par 3CX
+          // pour éviter d'empiler les onglets à chaque décrochage.
+          saveLdfSession({ phone: urlPhone, customers: null, panelState: 'normal' });
+          setTimeout(() => {
+            try { GM_closeTab(); } catch (e) { /* si la fermeture est refusée, on laisse simplement cet onglet ouvert */ }
+          }, 350);
+          return;
+        }
+        // Personne d'autre n'affiche la bulle : cet onglet devient l'hôte.
         phone = urlPhone;
         saveLdfSession({ phone, customers: null, panelState: 'normal' });
       } else if (existingSession && existingSession.phone) {
@@ -4361,6 +4416,32 @@ https://www.tousergo.com`,
       return `<div class="te-ldf-msg">${customers.length} clients possibles :</div>` +
         customers.map(c => customerCard(c, phone)).join('');
     }
+
+    // ------------------------------------------------------------
+    // Synchro temps réel entre onglets : dès qu'un AUTRE onglet modifie la
+    // session (nouvel appel, résultats de recherche prêts, enrichissement
+    // terminé, ou fermeture), cet onglet met sa bulle à jour immédiatement —
+    // sans re-déclencher sa propre recherche PrestaShop (seul l'onglet hôte
+    // qui a reçu l'appel s'en charge, pour ne pas multiplier les requêtes).
+    // ------------------------------------------------------------
+    GM_addValueChangeListener(LDF_SESSION_KEY, (name, oldValue, newValue, remote) => {
+      if (!remote) return; // déjà géré localement par l'onglet à l'origine du changement
+      if (!newValue) {
+        const panel = document.getElementById('te-ldf-panel');
+        if (panel) panel.remove();
+        const backdrop = document.getElementById('te-ldf-backdrop');
+        if (backdrop) backdrop.remove();
+        return;
+      }
+      let session;
+      try { session = JSON.parse(newValue); } catch (e) { return; }
+      const state = session.panelState || 'normal';
+      if (session.customers) {
+        renderPanel(renderCustomersHtml(session.customers, session.phone), session.phone, state);
+      } else {
+        renderPanel('<div class="te-ldf-msg">Recherche en cours…</div>', session.phone, state);
+      }
+    });
 
     initLeveeDeFiche();
   })();
@@ -4432,6 +4513,10 @@ https://www.tousergo.com`,
     const hash = location.hash.replace(/^#/, '');
     const params = new URLSearchParams(hash);
     if (params.get('model') !== 'eggs.presta.retour') return null;
+    // On exige la vue formulaire précisément (pas une liste/kanban de retours,
+    // où "id" pourrait être présent dans l'URL sans qu'on soit sur une fiche).
+    const viewType = params.get('view_type');
+    if (viewType && viewType !== 'form') return null;
     const id = params.get('id');
     return id ? parseInt(id, 10) : null;
   }
@@ -4482,6 +4567,303 @@ https://www.tousergo.com`,
   };
 
   // ------------------------------------------------------------
+  // Lecture du VRAI statut de livraison auprès du transporteur (Odoo n'a
+  // que la date d'expédition, pas la date de livraison confirmée). Chaque
+  // transporteur a son propre point d'entrée JSON, identifié via l'onglet
+  // Réseau du navigateur. Toutes les fonctions ci-dessous renvoient la
+  // même forme unifiée :
+  //   { delivered, statusLabel, deliveredAt (Date|null), detail, lastUpdateAt (Date|null) }
+  // fetchCarrierStatus() choisit la bonne fonction selon l'URL de suivi
+  // Odoo (picking.carrier_tracking_url) — ajouter un transporteur revient
+  // à ajouter un cas dans cette fonction + une paire fetch/parse dédiée.
+  // ------------------------------------------------------------
+  async function fetchCarrierStatus(picking) {
+    if (!picking || !picking.carrier_tracking_ref || !picking.carrier_tracking_url) return null;
+    const url = picking.carrier_tracking_url;
+    const ref = picking.carrier_tracking_ref;
+    try {
+      if (/chronopost/i.test(url)) return await fetchChronopostStatus(ref);
+      if (/laposte\.fr|colissimo/i.test(url)) return await fetchLaposteStatus(ref);
+      if (/gls/i.test(url)) return await fetchGlsStatus(ref);
+      if (/kuehne-nagel/i.test(url)) {
+        const m = url.match(/shipments\/(\d+)/);
+        if (m) return await fetchKnStatus(m[1]);
+      }
+    } catch (e) {
+      console.warn('[TE-Retour] Lecture suivi transporteur impossible', e);
+    }
+    return null;
+  }
+
+  // ---- Chronopost ----
+  function fetchChronopostStatus(trackingRef) {
+    const url = `https://www.chronopost.fr/tracking-no-cms/suivi-colis?&listeNumerosLT=${encodeURIComponent(trackingRef)}&langue=fr&_=${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        onload: (res) => {
+          try {
+            const data = JSON.parse(res.responseText);
+            if (data.error) { reject(new Error(data.error)); return; }
+            const parsed = parseChronopostTracking(data);
+            if (!parsed) { reject(new Error('Réponse Chronopost inattendue')); return; }
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error('Réponse Chronopost invalide (peut-être bloquée par une protection anti-robot) : ' + e.message));
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau Chronopost')),
+      });
+    });
+  }
+
+  // Le JSON Chronopost renvoie des fragments HTML (pas de champs structurés
+  // dédiés) : "tab" contient le tableau complet de l'historique (1ère ligne
+  // = évènement le plus récent), "top" contient la frise résumée avec la
+  // classe "active" sur l'étape actuellement atteinte.
+  function parseChronopostTracking(data) {
+    if (!data || !data.tab) return null;
+    const parser = new DOMParser();
+
+    let lastEventDate = '';
+    let lastEventDetail = '';
+    const tabDoc = parser.parseFromString(data.tab, 'text/html');
+    const firstRow = tabDoc.querySelector('#suiviTab tr.toggleElmt');
+    if (firstRow) {
+      const cells = firstRow.querySelectorAll('td');
+      if (cells[0]) {
+        lastEventDate = cells[0].innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+      }
+      if (cells[1]) {
+        lastEventDetail = cells[1].innerHTML.replace(/<br\s*\/?>/gi, ' — ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+      }
+    }
+
+    let activeLabel = '';
+    if (data.top) {
+      const topDoc = parser.parseFromString(data.top, 'text/html');
+      const activeEl = topDoc.querySelector('.ch-suivi-colis-light-info.active .ch-suivi-colis-light-text');
+      if (activeEl) activeLabel = activeEl.textContent.replace(/\s+/g, ' ').trim();
+    }
+
+    // "Livré" = livré ; "Envoi en cours de livraison" (commence par "Envoi")
+    // ne doit surtout pas être compté comme livré malgré le mot "livraison".
+    const delivered = /^livr/i.test(activeLabel);
+    const lastEventDateObj = parseFrenchDateTimeStr(lastEventDate);
+
+    return {
+      delivered,
+      statusLabel: activeLabel || lastEventDetail,
+      deliveredAt: delivered ? lastEventDateObj : null,
+      detail: lastEventDetail,
+      lastUpdateAt: lastEventDateObj,
+    };
+  }
+
+  // ---- La Poste / Colissimo ----
+  function fetchLaposteStatus(trackingRef) {
+    const url = `https://www.laposte.fr/ssu/sun/back/suivi-unifie/${encodeURIComponent(trackingRef)}?lang=fr`;
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers: { Accept: 'application/json' },
+        onload: (res) => {
+          try {
+            const data = JSON.parse(res.responseText);
+            const parsed = parseLaposteTracking(data);
+            if (!parsed) { reject(new Error('Réponse La Poste inattendue')); return; }
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error('Réponse La Poste invalide : ' + e.message));
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau La Poste')),
+      });
+    });
+  }
+
+  // La Poste renvoie du JSON structuré et déjà en français (contrairement à
+  // Chronopost) : "shipment.event" est trié du plus récent au plus ancien,
+  // "shipment.deliveryDate" est renseigné dès que le colis est livré.
+  function parseLaposteTracking(data) {
+    const entry = Array.isArray(data) ? data[0] : data;
+    if (!entry || !entry.shipment) return null;
+    const shipment = entry.shipment;
+    const events = shipment.event || [];
+    const lastEvent = events[0] || null;
+    const lastEventDateObj = lastEvent && lastEvent.date ? new Date(lastEvent.date) : null;
+    const delivered = !!shipment.deliveryDate && !!lastEvent && /livr/i.test(lastEvent.label || '');
+
+    return {
+      delivered,
+      statusLabel: lastEvent ? lastEvent.label : '',
+      deliveredAt: delivered ? new Date(shipment.deliveryDate) : null,
+      detail: '',
+      lastUpdateAt: lastEventDateObj,
+    };
+  }
+
+  // ---- GLS ----
+  function fetchGlsStatus(trackingRef) {
+    const url = `https://public.infra-prod.prod.cloud.fr.gls-group.com/consignee-ws/api/v1/command/public/codes/${encodeURIComponent(trackingRef)}?utm_source=group_redirect&utm_medium=other&utm_campaign=other`;
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers: { Accept: 'application/json' },
+        onload: (res) => {
+          try {
+            const data = JSON.parse(res.responseText);
+            const parsed = parseGlsTracking(data);
+            if (!parsed) { reject(new Error('Réponse GLS inattendue')); return; }
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error('Réponse GLS invalide : ' + e.message));
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau GLS')),
+      });
+    });
+  }
+
+  // GLS ne renvoie que des codes courts sans libellé (statutColis, statutEvenement)
+  // — le libellé français est généré côté site, on le reconstitue nous-mêmes à
+  // partir des codes déjà rencontrés le 22/07/2026 sur deux vrais colis (un
+  // livré normalement = "LIV", un retourné à l'expéditeur = "LIR"). Codes non
+  // encore rencontrés : on affiche le code brut plutôt que d'inventer un texte.
+  const GLS_STATUS_LABELS = {
+    LIV: 'Colis livré',
+    LIR: "Livré en retour chez l'expéditeur",
+    TRV: 'Colis en cours de livraison',
+    REC: 'Colis réceptionné en agence de livraison',
+    EXP: 'Colis expédié',
+    CON: 'Colis bientôt disponible sur notre réseau',
+  };
+
+  function parseGlsDateTime(str) {
+    if (!str) return null;
+    const d = new Date(str.replace(' ', 'T'));
+    return isNaN(d) ? null : d;
+  }
+
+  // "evenements" est trié du plus récent au plus ancien ; son 1er élément a
+  // toujours le même "statutEvenement" que "colis.statutColis" (vérifié sur
+  // les deux exemples réels) — c'est donc l'évènement à afficher.
+  function parseGlsTracking(data) {
+    if (!data || !data.colis) return null;
+    const statut = data.colis.statutColis;
+    const events = data.evenements || [];
+    const lastEvent = events[0] || null;
+    const lastEventDateObj = lastEvent ? parseGlsDateTime(lastEvent.datereference || lastEvent.datecreation) : null;
+    // "LIV" = livré chez le client. "LIR" (livré en RETOUR chez l'expéditeur)
+    // n'est volontairement PAS compté comme une livraison réussie ici.
+    const delivered = statut === 'LIV';
+
+    return {
+      delivered,
+      statusLabel: GLS_STATUS_LABELS[statut] || statut || '',
+      deliveredAt: delivered ? lastEventDateObj : null,
+      detail: '',
+      lastUpdateAt: lastEventDateObj,
+    };
+  }
+
+  // ---- Kuehne+Nagel ----
+  // L'identifiant numérique du colis (ex: 521607194) est déjà présent dans
+  // l'URL de suivi Odoo (.../shipments/521607194?query=...) : pas besoin
+  // d'étape de résolution supplémentaire, on l'extrait directement.
+  function fetchKnStatus(shipmentId) {
+    const url = `https://mykn.kuehne-nagel.com/public-tracking/internal/shipments/${encodeURIComponent(shipmentId)}/shipment-routing`;
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers: { Accept: 'application/json' },
+        onload: (res) => {
+          try {
+            const data = JSON.parse(res.responseText);
+            const parsed = parseKnTracking(data);
+            if (!parsed) { reject(new Error('Réponse Kuehne+Nagel inattendue')); return; }
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error('Réponse Kuehne+Nagel invalide : ' + e.message));
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau Kuehne+Nagel')),
+      });
+    });
+  }
+
+  // "routeLocations" décrit l'itinéraire complet (origine -> ... -> destination).
+  // Livré = le dernier point de la liste (la destination) a reached=true ET
+  // completed=true ; sa date vient du dernier jalon ("locationMilestones")
+  // de cette étape.
+  function parseKnTracking(data) {
+    if (!data || !Array.isArray(data.routeLocations) || !data.routeLocations.length) return null;
+    const last = data.routeLocations[data.routeLocations.length - 1];
+    const delivered = !!(last.reached && last.completed);
+
+    function milestoneDate(m) {
+      const dt = m && m.achievementDateTime && m.achievementDateTime.dateTime;
+      if (!dt) return null;
+      const raw = dt.offsetDateTime || dt.localDateTime;
+      if (!raw) return null;
+      const d = new Date(raw);
+      return isNaN(d) ? null : d;
+    }
+
+    let deliveredAt = null;
+    if (delivered && last.locationMilestones && last.locationMilestones.length) {
+      deliveredAt = milestoneDate(last.locationMilestones[last.locationMilestones.length - 1]);
+    }
+
+    // Dernier point réellement atteint (pour le libellé de statut si pas encore livré).
+    const reachedLocations = data.routeLocations.filter(rl => rl.reached);
+    const currentLoc = reachedLocations[reachedLocations.length - 1] || data.routeLocations[0];
+    const statusLabel = delivered
+      ? `Livré à ${(last.location && last.location.internationalName) || ''}`
+      : `En transit — dernier point atteint : ${(currentLoc.location && currentLoc.location.internationalName) || '?'}`;
+
+    // Horodatage le plus récent parmi tous les jalons de l'itinéraire.
+    let lastUpdateAt = null;
+    data.routeLocations.forEach((rl) => {
+      (rl.locationMilestones || []).forEach((m) => {
+        const d = milestoneDate(m);
+        if (d && (!lastUpdateAt || d > lastUpdateAt)) lastUpdateAt = d;
+      });
+    });
+
+    return { delivered, statusLabel, deliveredAt, detail: '', lastUpdateAt };
+  }
+
+  // Convertit "mardi 21/07/2026 14:15" (ou sans l'heure) en objet Date —
+  // format utilisé par Chronopost.
+  function parseFrenchDateTimeStr(str) {
+    if (!str) return null;
+    const m = str.match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
+    if (!m) return null;
+    const [, d, mo, y, h, mi] = m;
+    return new Date(Number(y), Number(mo) - 1, Number(d), h ? Number(h) : 0, mi ? Number(mi) : 0);
+  }
+
+  function fmtDateObj(d) {
+    if (!d || isNaN(d)) return null;
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+      ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function daysSinceDateObj(dateObj) {
+    if (!dateObj || isNaN(dateObj)) return null;
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const thenMidnight = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+    return Math.round((todayMidnight - thenMidnight) / 86400000);
+  }
+
+  // ------------------------------------------------------------
   // Récupération de toutes les données pour un retour donné.
   // ------------------------------------------------------------
   async function fetchRetourInfo(retourId) {
@@ -4520,6 +4902,11 @@ https://www.tousergo.com`,
       }
     }
 
+    // Date de livraison RÉELLE (pas la date d'expédition d'Odoo), lue
+    // directement chez le transporteur quand on sait le faire (Chronopost,
+    // La Poste/Colissimo pour l'instant).
+    const carrierInfo = await fetchCarrierStatus(picking);
+
     let refunds = [];
     if (order.invoice_ids && order.invoice_ids.length) {
       try {
@@ -4544,24 +4931,43 @@ https://www.tousergo.com`,
       console.warn('[TE-Retour] Lecture notes impossible', e);
     }
 
-    return { order, shippingAddr, picking, refunds, messages };
+    return { order, shippingAddr, picking, refunds, messages, carrierInfo };
   }
 
   // ------------------------------------------------------------
   // Construction du HTML du corps de la popup (sans l'en-tête, géré à part)
   // ------------------------------------------------------------
-  function buildBodyHtml({ order, shippingAddr, picking, refunds, messages }) {
+  function buildBodyHtml({ order, shippingAddr, picking, refunds, messages, carrierInfo }) {
     const orderDate = fmtDatetime(order.date_order);
 
     let deliveryHtml;
-    if (order.effective_date) {
+    if (carrierInfo && carrierInfo.delivered) {
+      // Date de livraison RÉELLE confirmée par le transporteur (pas la date
+      // d'expédition d'Odoo) : on privilégie toujours cette source quand elle
+      // est disponible et indique explicitement "Livré".
+      const nbJours = daysSinceDateObj(carrierInfo.deliveredAt);
+      deliveryHtml = `📦 Livré le <strong>${escapeHtml(fmtDateObj(carrierInfo.deliveredAt) || '')}</strong>` +
+        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis la livraison` : '') +
+        `<span class="te-rt-hint">Confirmé par le suivi transporteur${carrierInfo.detail ? ' — ' + escapeHtml(carrierInfo.detail) : ''}</span>`;
+    } else if (carrierInfo) {
+      // Pas encore livré, mais on a quand même le vrai statut en direct.
+      const lastUpdateStr = fmtDateObj(carrierInfo.lastUpdateAt);
+      deliveryHtml = `🚚 ${escapeHtml(carrierInfo.statusLabel || 'Colis en cours')}` +
+        (lastUpdateStr ? `<span class="te-rt-hint">Dernière info suivi : ${escapeHtml(lastUpdateStr)}</span>` : '');
+    } else if (order.effective_date) {
       const nbJours = daysSinceDate(order.effective_date);
-      deliveryHtml = `📅 Livrée le <strong>${fmtDate(order.effective_date)}</strong>` +
-        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis la livraison` : '');
+      // ⚠️ effective_date reflète la date de VALIDATION du bon de livraison
+      // (= date d'envoi du colis), pas la date de livraison réelle confirmée
+      // par le transporteur. Utilisé seulement en repli quand le suivi
+      // transporteur n'a pas pu être lu (transporteur non pris en charge,
+      // erreur réseau...).
+      deliveryHtml = `🚚 Expédiée le <strong>${fmtDate(order.effective_date)}</strong>` +
+        (nbJours !== null ? ` — <strong>${nbJours}</strong> jour${nbJours > 1 ? 's' : ''} depuis l'expédition` : '') +
+        `<span class="te-rt-hint">Date d'envoi du colis — voir le suivi ci-dessous pour la date de livraison réelle</span>`;
     } else if (picking) {
-      deliveryHtml = `🚚 Pas encore livrée (statut du colis : ${escapeHtml(picking.state)})`;
+      deliveryHtml = `🚚 Pas encore expédiée (statut du colis : ${escapeHtml(picking.state)})`;
     } else {
-      deliveryHtml = `🚚 Aucune livraison enregistrée pour cette commande`;
+      deliveryHtml = `🚚 Aucune expédition enregistrée pour cette commande`;
     }
 
     let trackingHtml = '';
@@ -4631,12 +5037,13 @@ https://www.tousergo.com`,
     style.textContent = `
       #${PANEL_ID} { position:fixed; top:130px; right:24px; width:340px; max-height:75vh;
         background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
-        z-index:100000; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        z-index:1030; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
         display:flex; flex-direction:column; overflow:hidden; }
       #${PANEL_ID}.te-rt-min { max-height:none; }
       #${PANEL_ID}.te-rt-min .te-rt-body { display:none; }
       #${PANEL_ID} .te-rt-head { background:#714B67; color:#fff; padding:10px 12px;
-        display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:default; flex-shrink:0; }
+        display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:move;
+        flex-shrink:0; user-select:none; touch-action:none; }
       #${PANEL_ID} .te-rt-head b { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       #${PANEL_ID} .te-rt-head-btns { display:flex; gap:4px; flex-shrink:0; }
       #${PANEL_ID} .te-rt-iconbtn { cursor:pointer; color:#e6dde4; font-size:14px; line-height:1;
@@ -4647,6 +5054,7 @@ https://www.tousergo.com`,
       #${PANEL_ID} .te-rt-section { margin-top:8px; }
       #${PANEL_ID} .te-rt-section:first-child { margin-top:0; }
       #${PANEL_ID} .te-rt-warn { color:#856404; }
+      #${PANEL_ID} .te-rt-hint { display:block; font-size:11px; color:#888; margin-top:2px; }
       #${PANEL_ID} .te-rt-track-btn { display:inline-block; padding:3px 10px; background:#714B67;
         color:#fff; border-radius:4px; text-decoration:none; font-size:12px; }
       #${PANEL_ID} .te-rt-track-ref { font-size:12px; color:#555; }
@@ -4674,6 +5082,57 @@ https://www.tousergo.com`,
   }
   const closedForId = new Set();
 
+  // Position mémorisée pour l'onglet (survit au changement de fiche retour,
+  // remise à zéro si l'onglet est fermé/rouvert).
+  function savePanelPosition(left, top) {
+    try { sessionStorage.setItem('te_rt_pos', JSON.stringify({ left, top })); } catch (e) { /* ignore */ }
+  }
+  function loadPanelPosition() {
+    try {
+      const raw = sessionStorage.getItem('te_rt_pos');
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  // Glisser-déposer via l'en-tête (Pointer Events : fonctionne à la souris
+  // comme au tactile). Bascule d'un positionnement "top/right" par défaut à
+  // un positionnement "left/top" explicite dès le premier déplacement.
+  function makeDraggable(panel, head) {
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    head.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.te-rt-iconbtn')) return; // pas de drag en cliquant sur — / ✕
+      dragging = true;
+      const rect = panel.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      panel.style.left = rect.left + 'px';
+      panel.style.top = rect.top + 'px';
+      panel.style.right = 'auto';
+      head.setPointerCapture(e.pointerId);
+    });
+
+    head.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const maxLeft = window.innerWidth - panel.offsetWidth - 4;
+      const maxTop = window.innerHeight - 40; // garde au moins l'en-tête visible
+      const newLeft = Math.max(4, Math.min(e.clientX - offsetX, maxLeft));
+      const newTop = Math.max(4, Math.min(e.clientY - offsetY, maxTop));
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+    });
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      savePanelPosition(parseInt(panel.style.left, 10), parseInt(panel.style.top, 10));
+    }
+    head.addEventListener('pointerup', endDrag);
+    head.addEventListener('pointercancel', endDrag);
+  }
+
   function getOrCreatePanel() {
     ensureStyles();
     let panel = document.getElementById(PANEL_ID);
@@ -4693,7 +5152,18 @@ https://www.tousergo.com`,
     `;
     document.body.appendChild(panel);
 
+    // Repositionnement à l'endroit laissé par le dernier glisser-déposer,
+    // sinon position par défaut (haut à droite) définie en CSS.
+    const savedPos = loadPanelPosition();
+    if (savedPos) {
+      panel.style.left = savedPos.left + 'px';
+      panel.style.top = savedPos.top + 'px';
+      panel.style.right = 'auto';
+    }
+
     if (isMinPref()) panel.classList.add('te-rt-min');
+
+    makeDraggable(panel, panel.querySelector('.te-rt-head'));
 
     panel.querySelector('[data-action="min"]').addEventListener('click', () => {
       const nowMin = !panel.classList.contains('te-rt-min');
