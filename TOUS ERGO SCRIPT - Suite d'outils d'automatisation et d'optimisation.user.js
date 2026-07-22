@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      3.9
+// @version      4.2
 // @author       Jimmy COCQUEREL-BUSCOT
-// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page pleine largeur avec notification système (3CX), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
+// @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
 // @match        https://app.crisp.chat/*
 // @match        https://sellercentral.amazon.fr/*
@@ -1951,7 +1951,7 @@ https://www.tousergo.com`,
                       if (resData.result && resData.result.length > 0) {
                           const orderId = resData.result[0].id;
                           const orderURL = `${odooBaseURL}/web#id=${orderId}&model=sale.order&view_type=form&menu_id=171`;
-                          window.open(orderURL, "_blank");
+                          window.location.href = orderURL;
                           button.textContent = "Trouvé !";
                           button.style.backgroundColor = "#28a745";
                       } else {
@@ -2067,17 +2067,17 @@ https://www.tousergo.com`,
                       }
 
                       if (orderURL) {
-                          window.open(orderURL, "_blank");
+                          window.location.href = orderURL;
                           button.textContent = "Trouvé !";
                           button.style.backgroundColor = "#28a745";
                       } else {
                           console.warn("[Bouton Presta] Lien direct non trouvé, repli sur la recherche. Extrait HTML pour debug :", html.substring(0, 3000));
-                          window.open(searchURL, "_blank");
+                          window.location.href = searchURL;
                           button.textContent = "Ouvert (recherche)";
                           button.style.backgroundColor = "#df0067";
                       }
                   } catch (e) {
-                      window.open(searchURL, "_blank");
+                      window.location.href = searchURL;
                       button.textContent = "Ouvert (recherche)";
                       button.style.backgroundColor = "#df0067";
                   }
@@ -2088,7 +2088,7 @@ https://www.tousergo.com`,
                   }, 3000);
               },
               onerror: function() {
-                  window.open(searchURL, "_blank");
+                  window.location.href = searchURL;
                   button.textContent = "Ouvert (recherche)";
                   button.style.backgroundColor = "#df0067";
                   setTimeout(() => {
@@ -2374,7 +2374,7 @@ https://www.tousergo.com`,
                           const chosen = withTracking.find(p => p.state === 'done') || withTracking[0];
 
                           if (chosen && chosen.carrier_tracking_url) {
-                              window.open(chosen.carrier_tracking_url, "_blank");
+                              window.location.href = chosen.carrier_tracking_url;
                               button.textContent = "Suivi ouvert !";
                               button.style.backgroundColor = "#28a745";
                           } else {
@@ -2796,7 +2796,7 @@ https://www.tousergo.com`,
                       bo_query: email
                   });
                   const finalURL = `${baseURL}?${params.toString()}`;
-                  window.open(finalURL, '_blank');
+                  window.location.href = finalURL;
               };
 
               container.appendChild(btn);
@@ -2844,7 +2844,7 @@ https://www.tousergo.com`,
                       !node.parentNode.closest('a')
                   ) {
                       const replaced = node.textContent.replace(REF_REGEX, ref => {
-                          return `<a href="${ODOO_URL_PREFIX}${ref}" target="_blank" style="color: #007bff; text-decoration: underline;">${ref}</a>`;
+                          return `<a href="${ODOO_URL_PREFIX}${ref}" target="_self" style="color: #007bff; text-decoration: underline;">${ref}</a>`;
                       });
 
                       const span = document.createElement('span');
@@ -2929,13 +2929,13 @@ https://www.tousergo.com`,
 })();
 
 // ============================================================================
-// MODULE : 7. DEV - Levée de fiche téléphone flottante BAS DE PAGE (3CX -> PrestaShop/Odoo)
+// MODULE : 7. DEV - Levée de fiche téléphone flottante BAS DE PAGE (PrestaShop/Odoo)
 // ============================================================================
 (function () {
   'use strict';
+  // Note : app.crisp.chat retiré de la liste des domaines
   const LDF_HOSTS = new Set([
     'www.tousergo.com',
-    'app.crisp.chat',
     'sellercentral.amazon.fr',
     'sellercentral-europe.amazon.com',
     'adeo-marketplace.mirakl.net',
@@ -3347,20 +3347,22 @@ https://www.tousergo.com`,
       const style = document.createElement('style');
       style.id = 'te-ldf-style';
       style.textContent = `
-        /* Alignement flottant bas de page pleine largeur */
+        /* Alignement flottant bas de page semi-transparent avec flou d'arrière-plan */
         #te-ldf-panel { position:fixed; bottom:0; left:0; width:100vw; max-height:35vh;
-          z-index:2147483647; background:#fff; color:#1a1e2a;
+          z-index:2147483647; background:rgba(255, 255, 255, 0.88); color:#1a1e2a;
+          backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
           font-family:-apple-system,'Segoe UI',sans-serif; font-size:12px;
-          box-shadow:0 -6px 25px rgba(0,0,0,.25); display:flex; flex-direction:column;
+          box-shadow:0 -6px 25px rgba(0,0,0,.18); display:flex; flex-direction:column;
           overflow:hidden; border-top:3px solid #1e2540; transition:max-height .2s ease; }
 
         #te-ldf-panel.te-ldf-min { max-height:36px; }
         #te-ldf-panel.te-ldf-min .te-ldf-body { display:none; }
+        /* L'agrandissement reste restreint au bas de page */
         #te-ldf-panel.te-ldf-expanded { max-height:70vh; }
 
-        #te-ldf-backdrop { position:fixed; inset:0; background:rgba(10,12,20,.35); z-index:2147483646; }
+        #te-ldf-backdrop { position:fixed; inset:0; background:rgba(10,12,20,.15); z-index:2147483646; }
 
-        #te-ldf-panel .te-ldf-head { background:#1e2540; color:#fff; padding:6px 16px;
+        #te-ldf-panel .te-ldf-head { background:rgba(30, 37, 64, 0.95); color:#fff; padding:6px 16px;
           display:flex; justify-content:space-between; align-items:center; flex-shrink:0; gap:10px; height:36px; box-sizing:border-box; }
         #te-ldf-panel .te-ldf-head b { font-size:13px; white-space:nowrap; }
         #te-ldf-panel .te-ldf-head small { color:#9aa3c2; font-size:11px; margin-left:8px; display:inline-block; }
@@ -3369,13 +3371,13 @@ https://www.tousergo.com`,
           background:none; border:none; padding:4px 6px; border-radius:4px; }
         #te-ldf-panel .te-ldf-iconbtn:hover { color:#fff; background:rgba(255,255,255,.12); }
 
-        /* Conteneur horizontal déroulant pour plusieurs clients */
+        /* Conteneur horizontal déroulant pour les clients */
         #te-ldf-panel .te-ldf-body { overflow-x:auto; overflow-y:auto; padding:8px 12px; display:flex; gap:12px; flex:1; align-items:flex-start; }
         #te-ldf-panel .te-ldf-msg { padding:6px; color:#5a6072; font-style:italic; }
 
-        /* Carte client étalée et compacte */
-        #te-ldf-panel .te-ldf-card { border:1px solid #e2e5ea; border-radius:8px; padding:8px 12px;
-          min-width:320px; flex:1; background:#fcfdfe; box-shadow:0 1px 3px rgba(0,0,0,.05); box-sizing:border-box; }
+        /* Carte client maîtresse : max-width fixe pour éviter l'étalement abusif si 1 seul résultat */
+        #te-ldf-panel .te-ldf-card { border:1px solid rgba(226, 229, 234, 0.8); border-radius:8px; padding:8px 12px;
+          min-width:320px; max-width:420px; flex:1; background:rgba(252, 253, 254, 0.85); box-shadow:0 1px 4px rgba(0,0,0,.04); box-sizing:border-box; }
         #te-ldf-panel .te-ldf-name { font-weight:700; font-size:13px; display:flex; justify-content:space-between; align-items:center; }
         #te-ldf-panel .te-ldf-badge { background:#fdeee7; color:#c1502e;
           font-size:10px; font-weight:700; padding:1px 6px; border-radius:12px; }
@@ -3399,9 +3401,11 @@ https://www.tousergo.com`,
         #te-ldf-panel .te-ldf-order-meta { color:#8a90a0; font-size:10.5px; }
         #te-ldf-panel .te-ldf-order-icons { display:flex; gap:4px; flex-shrink:0; }
         #te-ldf-panel .te-ldf-loading { font-size:10.5px; color:#a5abb5; font-style:italic; margin-top:4px; }
+        
+        /* Boutons explicites "Presta" et "Odoo" pour les commandes */
         #te-ldf-panel .te-ldf-icon-btn { display:inline-flex; align-items:center; justify-content:center;
-          width:20px; height:20px; border-radius:4px; font-size:10px; font-weight:700; text-decoration:none;
-          cursor:pointer; border:none; line-height:1; }
+          padding:2px 6px; border-radius:4px; font-size:10px; font-weight:600; text-decoration:none;
+          cursor:pointer; border:none; line-height:1.2; }
         #te-ldf-panel .te-ldf-icon-ps { background:#fbe4ef; color:#DF0067; }
         #te-ldf-panel .te-ldf-icon-ps:hover { background:#DF0067; color:#fff; }
         #te-ldf-panel .te-ldf-icon-odoo { background:#ece3e8; color:#714B67; }
@@ -3435,6 +3439,7 @@ https://www.tousergo.com`,
         clearTimeout(ldfAutoCloseTimer);
         ldfAutoCloseTimer = null;
       }
+      // Fermeture auto ajustée à 5 minutes (5 * 60 * 1000)
       ldfAutoCloseTimer = setTimeout(() => {
         const panel = document.getElementById('te-ldf-panel');
         if (panel) {
@@ -3443,7 +3448,7 @@ https://www.tousergo.com`,
           panel.remove();
           clearLdfSession();
         }
-      }, 15 * 60 * 1000);
+      }, 5 * 60 * 1000);
     }
 
     function renderPanel(bodyHtml, headerSubtitle, initialState) {
@@ -3454,7 +3459,7 @@ https://www.tousergo.com`,
         panel.id = 'te-ldf-panel';
         panel.innerHTML = `
           <div class="te-ldf-head">
-            <div><b>Levée de fiche 3CX</b><small id="te-ldf-subtitle"></small></div>
+            <div><b>Levée de fiche</b><small id="te-ldf-subtitle"></small></div>
             <div class="te-ldf-head-btns">
               <button class="te-ldf-iconbtn" data-action="min" type="button" title="Réduire / restaurer">—</button>
               <button class="te-ldf-iconbtn" data-action="expand" type="button" title="Agrandir / Réduire la hauteur">⛶</button>
@@ -3516,7 +3521,7 @@ https://www.tousergo.com`,
               btn.textContent = 'Aucune fiche';
               setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1800);
             } else if (results.length === 1) {
-              window.open(`${ODOO_URL}/web#id=${results[0].id}&model=res.partner&view_type=form`, '_blank');
+              window.location.href = `${ODOO_URL}/web#id=${results[0].id}&model=res.partner&view_type=form`;
               btn.textContent = originalText; btn.disabled = false;
             } else {
               let list = btn.parentElement.querySelector('.te-ldf-odoo-results');
@@ -3529,7 +3534,7 @@ https://www.tousergo.com`,
                 results.map(r => `
                   <div class="te-ldf-odoo-item">
                     <span>${r.name || ''}${r.company_name ? ` — ${r.company_name}` : ''}</span>
-                    <a href="${ODOO_URL}/web#id=${r.id}&model=res.partner&view_type=form" target="_blank">Ouvrir →</a>
+                    <a href="${ODOO_URL}/web#id=${r.id}&model=res.partner&view_type=form" target="_self">Ouvrir →</a>
                   </div>`).join('');
               btn.textContent = originalText; btn.disabled = false;
             }
@@ -3550,7 +3555,7 @@ https://www.tousergo.com`,
         btn.addEventListener('click', () => {
           const reference = btn.getAttribute('data-reference') || '';
           if (!reference) return;
-          window.open(`${ODOO_URL}/order?search=${encodeURIComponent(reference)}`, '_blank');
+          window.location.href = `${ODOO_URL}/order?search=${encodeURIComponent(reference)}`;
         });
       });
     }
@@ -3591,8 +3596,8 @@ https://www.tousergo.com`,
             <span class="te-ldf-order-meta">${formatMoney(o.total_paid)}${o.stateName ? ` · ${o.stateName}` : ''}</span>
           </div>
           <div class="te-ldf-order-icons">
-            <a href="${orderLink}" target="_blank" class="te-ldf-icon-btn te-ldf-icon-ps" title="Ouvrir dans PrestaShop">P</a>
-            <button type="button" class="te-ldf-icon-btn te-ldf-icon-odoo" data-reference="${ref}" title="Ouvrir dans Odoo">O</button>
+            <a href="${orderLink}" target="_self" class="te-ldf-icon-btn te-ldf-icon-ps" title="Ouvrir dans PrestaShop">Presta</a>
+            <button type="button" class="te-ldf-icon-btn te-ldf-icon-odoo" data-reference="${ref}" title="Ouvrir dans Odoo">Odoo</button>
           </div>
         </div>`;
       }).join('');
@@ -3625,7 +3630,7 @@ https://www.tousergo.com`,
         ${addressLine ? `<div class="te-ldf-row"><b>Adresse :</b> ${addressLine}</div>` : ''}
         <div class="te-ldf-extra" data-customer-id="${c.id}">${extraContent}</div>
         <div class="te-ldf-actions">
-          <a class="te-ldf-btn te-ldf-btn-ps" href="${psLink}" target="_blank">PrestaShop</a>
+          <a class="te-ldf-btn te-ldf-btn-ps" href="${psLink}" target="_self">PrestaShop</a>
           <button class="te-ldf-btn te-ldf-btn-odoo" type="button"
             data-email="${(c.email || '').replace(/"/g, '&quot;')}"
             data-phone="${(info.phone || searchedPhone || '').replace(/"/g, '&quot;')}"
@@ -4245,7 +4250,7 @@ https://www.tousergo.com`,
 
     let trackingHtml = '';
     if (picking && picking.carrier_tracking_url) {
-      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" rel="noopener" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
+      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_self" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
     } else if (picking && picking.carrier_tracking_ref) {
       trackingHtml = `<span class="te-rt-track-ref">N° suivi : ${escapeHtml(picking.carrier_tracking_ref)} (pas de lien direct)</span>`;
     }
