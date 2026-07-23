@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      4.5
+// @version      4.6
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -83,21 +83,19 @@
           {
             id: 'demande-info',
             label: 'Demande SIRET / Mail compta',
-            shortLabel: 'Demande SIRET/compta',
+            shortLabel: 'Demande SIRET/mail compta',
             groupValue: '26',
             encours: 0,
             delai: 0,
-            emailSubject: 'Informations complémentaires pour la création de votre compte professionnel',
+            emailSubject: 'Informations manquantes pour l'ouverture de votre compte',
             emailBody:
 `Bonjour,
 
 Nous avons bien reçu votre demande d'ouverture de compte professionnel sur tousergo.com.
 
 Afin de pouvoir finaliser l'ouverture de votre compte, pourriez-vous nous transmettre les informations complémentaires suivantes :
-➡️ Votre numéro SIRET
+➡️ Votre numéro SIRET complet
 ➡️ L'adresse e-mail de votre service comptabilité (pour l'envoi des factures)
-
-Dans l'attente de ces informations, votre compte a été configuré en accès professionnel avant expédition.
 
 Nous restons à votre disposition et vous souhaitons une bonne journée.
 
