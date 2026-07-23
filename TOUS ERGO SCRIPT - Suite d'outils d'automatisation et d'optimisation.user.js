@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      4.9
+// @version      5.0.1
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -3229,7 +3229,7 @@ https://www.tousergo.com`,
 
       box.innerHTML = `
         <button type="button" id="te-ldf-creds-close" style="position:absolute; top:8px; right:12px; cursor:pointer; font-size:20px; border:none; background:none; color:#888; line-height:1;">×</button>
-        <h2 style="margin:0 0 14px; font-size:17px;">Identifiants Levée de fiche</h2>
+        <h2 style="margin:0 0 14px; font-size:17px;">Identifiants - TOUS ERGO TOOLKIT</h2>
 
         <label style="display:block; font-size:12px; font-weight:600; color:#555; margin-top:4px;">Clé Webservice PrestaShop <span style="font-weight:400; color:#888;">(lecture seule, addresses/customers)</span></label>
         <input type="text" id="te-ldf-ws-key" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 12px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
@@ -3246,7 +3246,7 @@ https://www.tousergo.com`,
         </label>
 
         <label style="display:block; font-size:12px; font-weight:600; color:#555;">Base de données Odoo</label>
-        <input type="text" id="te-ldf-odoo-db" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 18px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+        <input type="text" id="te-ldf-odoo-db" readonly style="display:block; width:100%; box-sizing:border-box; margin:4px 0 18px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit; background:#f5f7f8; color:#666; cursor:not-allowed;">
 
         <div style="display:flex; gap:10px; justify-content:flex-end;">
           <button type="button" id="te-ldf-creds-cancel" style="padding:8px 16px; font-size:13px; border:1px solid #ccc; border-radius:5px; background:#fff; color:#444; cursor:pointer;">Annuler</button>
@@ -3284,7 +3284,7 @@ https://www.tousergo.com`,
         GM_setValue('te_ldf_ws_key', wsKeyInput.value.trim());
         GM_setValue('te_ldf_odoo_login', loginInput.value.trim());
         GM_setValue('te_ldf_odoo_pwd', pwdInput.value);
-        GM_setValue('te_ldf_odoo_db', dbInput.value.trim() || 'TOUSERGOS');
+        GM_setValue('te_ldf_odoo_db', 'TOUSERGOS');
         closeModal();
         alert('Identifiants enregistrés sur ce poste.');
       });
@@ -3663,16 +3663,21 @@ https://www.tousergo.com`,
       style.textContent = `
         /* Alignement flottant bas de page semi-transparent avec flou d'arrière-plan */
         #te-ldf-panel { position:fixed; bottom:0; left:0; width:100vw; max-height:35vh;
-          z-index:2147483647; background:rgba(255, 255, 255, 0.88); color:#1a1e2a;
-          backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+          z-index:2147483647; background:rgba(255, 255, 255, 0.72); color:#1a1e2a;
+          backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px);
           font-family:-apple-system,'Segoe UI',sans-serif; font-size:12px;
-          box-shadow:0 -6px 25px rgba(0,0,0,.18); display:flex; flex-direction:column;
-          overflow:hidden; border-top:3px solid #1e2540; transition:max-height .2s ease; }
+          box-shadow:0 -6px 25px rgba(0,0,0,.14); display:flex; flex-direction:column;
+          overflow:hidden; border-top:1px solid rgba(30,37,64,.35); transition:max-height .2s ease; }
+
+        /* Dégradé de fondu au-dessus du panneau pour éviter une coupure brute avec la page */
+        #te-ldf-panel::before { content:''; position:absolute; left:0; right:0; bottom:100%; height:28px;
+          background:linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 100%);
+          backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px); pointer-events:none; }
 
         #te-ldf-panel.te-ldf-min { max-height:36px; }
         #te-ldf-panel.te-ldf-min .te-ldf-body { display:none; }
         /* L'agrandissement reste restreint au bas de page */
-        #te-ldf-panel.te-ldf-expanded { max-height:70vh; }
+        #te-ldf-panel.te-ldf-expanded { height:70vh; max-height:70vh; }
 
         #te-ldf-backdrop { position:fixed; inset:0; background:rgba(10,12,20,.15); z-index:2147483646; }
 
@@ -4185,10 +4190,14 @@ https://www.tousergo.com`,
     partial: '#ffc107', reversed: '#6c757d',
   };
 
+  function splitTrackingRefs(rawRef) {
+    return (rawRef || '').split(',').map((r) => r.trim()).filter(Boolean);
+  }
+
   async function fetchCarrierStatus(picking) {
     if (!picking || !picking.carrier_tracking_ref || !picking.carrier_tracking_url) return null;
     const url = picking.carrier_tracking_url;
-    const ref = picking.carrier_tracking_ref;
+    const ref = splitTrackingRefs(picking.carrier_tracking_ref)[0] || picking.carrier_tracking_ref;
     try {
       if (/chronopost/i.test(url)) return await fetchChronopostStatus(ref);
       if (/laposte\.fr|colissimo/i.test(url)) return await fetchLaposteStatus(ref);
@@ -4563,9 +4572,26 @@ https://www.tousergo.com`,
 
     let trackingHtml = '';
     if (picking && picking.carrier_tracking_url) {
-      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
+      const refs = splitTrackingRefs(picking.carrier_tracking_ref);
+      const fullRef = picking.carrier_tracking_ref;
+      if (refs.length > 1) {
+        trackingHtml = refs.map((ref, i) => {
+          let individualUrl = picking.carrier_tracking_url;
+          if (fullRef && individualUrl.includes(fullRef)) {
+            individualUrl = individualUrl.split(fullRef).join(ref);
+          } else if (fullRef && individualUrl.includes(encodeURIComponent(fullRef))) {
+            individualUrl = individualUrl.split(encodeURIComponent(fullRef)).join(encodeURIComponent(ref));
+          }
+          return `<a href="${individualUrl}" target="_blank" class="te-rt-track-btn" style="margin:2px 4px 2px 0;">📦 Colis ${i + 1} — ${escapeHtml(ref)}</a>`;
+        }).join('');
+      } else {
+        trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
+      }
     } else if (picking && picking.carrier_tracking_ref) {
-      trackingHtml = `<span class="te-rt-track-ref">N° suivi : ${escapeHtml(picking.carrier_tracking_ref)} (pas de lien direct)</span>`;
+      const refs = splitTrackingRefs(picking.carrier_tracking_ref);
+      trackingHtml = refs.map((ref) =>
+        `<span class="te-rt-track-ref" style="display:block;">N° suivi : ${escapeHtml(ref)} (pas de lien direct)</span>`
+      ).join('');
     }
 
     let addrHtml = 'Adresse de livraison introuvable';
@@ -4622,7 +4648,7 @@ https://www.tousergo.com`,
     const style = document.createElement('style');
     style.id = 'te-rt-style';
     style.textContent = `
-      #${PANEL_ID} { position:fixed; top:260px; right:24px; width:340px; max-height:70vh;
+      #${PANEL_ID} { position:fixed; top:150px; right:24px; width:340px; max-height:70vh;
         background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
         z-index:1030; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
         display:flex; flex-direction:column; overflow:hidden; }
@@ -4804,8 +4830,443 @@ https://www.tousergo.com`,
     }, 250);
   }
 
+  const REFUS_14J_TEMPLATE_NAME = 'SC - RETOUR DÉLAI DÉPASSÉ 14 JOURS';
+  const REFUS_14J_BTN_ID = 'te-rt-refus-14j-btn';
+
+  function injectRefus14jButton(retourId) {
+    const statusbar = document.querySelector('.o_statusbar_buttons');
+    if (!statusbar) return;
+    if (document.getElementById(REFUS_14J_BTN_ID)) return;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'te-rt-refus-14j-wrap';
+    wrap.style.cssText = 'width:100%; margin-top:6px;';
+
+    const btn = document.createElement('button');
+    btn.id = REFUS_14J_BTN_ID;
+    btn.type = 'button';
+    btn.className = 'btn btn-secondary';
+    btn.style.cssText = 'background:#c1502e; color:#fff; border-color:#c1502e;';
+    btn.innerHTML = '<span>Retour refusé (délai 14 jours dépassé)</span>';
+
+    wrap.appendChild(btn);
+    statusbar.insertAdjacentElement('afterend', wrap);
+
+    btn.addEventListener('click', async () => {
+      const currentId = getRetourIdFromHash();
+      if (!currentId) return;
+      if (!confirm(`Envoyer le mail "${REFUS_14J_TEMPLATE_NAME}" au client ?`)) return;
+
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span>Envoi en cours…</span>';
+
+      try {
+        const templates = await odooCall('mail.template', 'search_read',
+          [[['name', '=', REFUS_14J_TEMPLATE_NAME]]], { fields: ['id', 'model'], limit: 1 });
+        const template = templates && templates[0];
+        if (!template) throw new Error(`Modèle mail introuvable : "${REFUS_14J_TEMPLATE_NAME}"`);
+
+        let resId = currentId;
+        if (template.model && template.model !== 'eggs.presta.retour') {
+          const [retour] = await odooCall('eggs.presta.retour', 'read', [[currentId], ['order_id']]);
+          const orderRel = retour ? retour.order_id : null;
+          resId = Array.isArray(orderRel) ? orderRel[0] : orderRel;
+          if (!resId) throw new Error("Commande introuvable pour ce retour");
+        }
+
+        await odooCall('mail.template', 'send_mail', [template.id, resId], { force_send: true });
+        btn.innerHTML = '<span>✓ Mail envoyé</span>';
+        setTimeout(() => { btn.innerHTML = originalHtml; btn.disabled = false; }, 4000);
+      } catch (e) {
+        console.error('[TE-Retour] Erreur envoi mail refus 14j', e);
+        alert("Impossible d'envoyer le mail : " + e.message);
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+      }
+    });
+  }
+
+  function removeRefus14jButton() {
+    const wrap = document.getElementById('te-rt-refus-14j-wrap');
+    if (wrap) wrap.remove();
+  }
+
   function tryRender() {
     const id = getRetourIdFromHash();
+    if (!id) {
+      if (lastRenderedId !== null) { removePanel(); lastRenderedId = null; }
+      removeRefus14jButton();
+      return;
+    }
+    injectRefus14jButton(id);
+    if (id === lastRenderedId && document.getElementById(PANEL_ID)) return;
+    if (!document.querySelector('.o_form_view')) return;
+    lastRenderedId = id;
+    renderPanel(id);
+  }
+
+  new MutationObserver(scheduleTryRender).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('hashchange', () => { lastRenderedId = null; scheduleTryRender(); });
+  scheduleTryRender();
+})();
+
+// ============================================================================
+// MODULE : 9. DEV - Infos retour sur les avoirs (Odoo Comptabilité / account.move)
+// ============================================================================
+(function () {
+  'use strict';
+  if (location.hostname !== 'tousergo.eggs-solutions.fr') return;
+
+  const ODOO_URL = 'https://tousergo.eggs-solutions.fr';
+  const PANEL_ID = 'te-cm-panel';
+
+  function odooCall(model, method, args, kwargs) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${ODOO_URL}/web/dataset/call_kw`,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'call',
+          params: { model, method, args: args || [], kwargs: kwargs || {} },
+          id: Math.floor(Math.random() * 1000000),
+        }),
+        onload: (res) => {
+          try {
+            const data = JSON.parse(res.responseText);
+            if (data.error) {
+              reject(new Error(data.error.data?.message || data.error.message || 'Erreur Odoo'));
+              return;
+            }
+            resolve(data.result);
+          } catch (e) {
+            reject(e);
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau Odoo')),
+      });
+    });
+  }
+
+  function getMoveIdFromHash() {
+    const hash = location.hash.replace(/^#/, '');
+    const params = new URLSearchParams(hash);
+    if (params.get('model') !== 'account.move') return null;
+    const viewType = params.get('view_type');
+    if (viewType && viewType !== 'form') return null;
+    const id = params.get('id');
+    return id ? parseInt(id, 10) : null;
+  }
+
+  function fmtDatetime(odooValue) {
+    if (!odooValue) return null;
+    const d = new Date(odooValue.replace(' ', 'T') + 'Z');
+    if (isNaN(d)) return odooValue;
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+      ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function fmtDate(odooValue) {
+    if (!odooValue) return null;
+    const [y, m, d] = odooValue.split('-');
+    if (!y || !m || !d) return odooValue;
+    return `${d}/${m}/${y}`;
+  }
+
+  function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html || '';
+    return (div.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+  }
+
+  const MOVE_STATE_LABELS = { draft: 'brouillon', posted: 'validée', cancel: 'annulée' };
+  const PAYMENT_STATE_LABELS = {
+    not_paid: 'non payé', in_payment: 'en cours de paiement', paid: 'payé',
+    partial: 'partiellement payé', reversed: 'extourné', invoicing_legacy: 'ancien système',
+  };
+  const REFUND_STATE_COLORS = {
+    paid: '#28a745', in_payment: '#ffc107', not_paid: '#dc3545',
+    partial: '#ffc107', reversed: '#6c757d',
+  };
+  function trLabel(map, code) {
+    if (!code) return 'n/a';
+    return map[code] || code;
+  }
+
+  let refPrestaFieldChecked = false;
+  let refPrestaFieldName = null;
+
+  async function detectRefPrestaField() {
+    if (refPrestaFieldChecked) return refPrestaFieldName;
+    refPrestaFieldChecked = true;
+    try {
+      const fields = await odooCall('account.move', 'fields_get', [], { attributes: ['string'] });
+      const keys = Object.keys(fields);
+      refPrestaFieldName = keys.find((k) => /prestashop/i.test(k))
+        || keys.find((k) => fields[k].string && /prestashop/i.test(fields[k].string))
+        || null;
+    } catch (e) {
+      console.warn('[TE-Compta] Détection du champ référence PrestaShop impossible', e);
+    }
+    return refPrestaFieldName;
+  }
+
+  async function fetchMoveInfo(moveId) {
+    const moveTypeField = 'move_type';
+    let move;
+    try {
+      [move] = await odooCall('account.move', 'read', [[moveId],
+        [moveTypeField, 'name', 'state', 'invoice_origin', 'amount_total', 'invoice_payment_state']]);
+    } catch (e) {
+      // Compat Odoo < 13.0 SaaS : champ "type" au lieu de "move_type"
+      [move] = await odooCall('account.move', 'read', [[moveId],
+        ['type', 'name', 'state', 'invoice_origin', 'amount_total', 'invoice_payment_state']]);
+      move.move_type = move.type;
+    }
+
+    const isRefund = move.move_type === 'out_refund';
+
+    const fieldName = await detectRefPrestaField();
+    let refPrestashop = null;
+    if (fieldName) {
+      try {
+        const [withRef] = await odooCall('account.move', 'read', [[moveId], [fieldName]]);
+        refPrestashop = withRef ? withRef[fieldName] : null;
+      } catch (e) {
+        console.warn('[TE-Compta] Lecture référence PrestaShop impossible', e);
+      }
+    }
+
+    let retours = [];
+    if (refPrestashop) {
+      try {
+        retours = await odooCall('eggs.presta.retour', 'search_read',
+          [[['ref_prestashop', '=', refPrestashop]]],
+          { fields: ['statut_retour_id', 'create_date', 'order_id'], limit: 10 });
+      } catch (e) {
+        console.warn('[TE-Compta] Recherche des retours impossible', e);
+      }
+    }
+
+    let orderId = retours.length && retours[0].order_id ? retours[0].order_id[0] : null;
+    if (!orderId && move.invoice_origin) {
+      try {
+        const orders = await odooCall('sale.order', 'search_read',
+          [[['name', '=', move.invoice_origin]]], { fields: ['id'], limit: 1 });
+        if (orders.length) orderId = orders[0].id;
+      } catch (e) {
+        console.warn('[TE-Compta] Recherche commande via invoice_origin impossible', e);
+      }
+    }
+
+    let refunds = [];
+    let messages = [];
+    if (orderId) {
+      try {
+        const [order] = await odooCall('sale.order', 'read', [[orderId], ['invoice_ids']]);
+        if (order && order.invoice_ids && order.invoice_ids.length) {
+          const moves = await odooCall('account.move', 'read', [
+            order.invoice_ids, ['name', 'move_type', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
+          ]);
+          refunds = moves.filter((m) => m.move_type === 'out_refund');
+        }
+      } catch (e) {
+        console.warn('[TE-Compta] Lecture avoirs commande impossible', e);
+      }
+      try {
+        messages = await odooCall('mail.message', 'search_read', [
+          [['model', '=', 'sale.order'], ['res_id', '=', orderId], ['message_type', '=', 'comment']],
+        ], { fields: ['body', 'date', 'author_id'], order: 'date desc', limit: 3 });
+      } catch (e) {
+        console.warn('[TE-Compta] Lecture notes commande impossible', e);
+      }
+    }
+
+    return { move, isRefund, refPrestashop, retours, orderId, refunds, messages };
+  }
+
+  function buildBodyHtml({ move, isRefund, refPrestashop, retours, orderId, refunds, messages }) {
+    let retourHtml;
+    if (!refPrestashop) {
+      retourHtml = `<span class="te-cm-warn">Référence PrestaShop introuvable sur cet avoir.</span>`;
+    } else if (!retours.length) {
+      retourHtml = `<span class="te-cm-warn">Réf. PrestaShop <strong>${escapeHtml(refPrestashop)}</strong> — aucun retour trouvé dans "Odoo Retour".</span>`;
+    } else {
+      retourHtml = retours.map((r) => {
+        const statut = r.statut_retour_id ? r.statut_retour_id[1] : 'n/a';
+        return `<div class="te-cm-retour-row">
+          <span class="te-cm-dot"></span>
+          Retour du <strong>${escapeHtml(fmtDatetime(r.create_date) || '')}</strong> — statut : <strong>${escapeHtml(statut)}</strong>
+        </div>`;
+      }).join('');
+    }
+
+    let refundsHtml;
+    if (!orderId) {
+      refundsHtml = `<span class="te-cm-warn">Commande liée introuvable.</span>`;
+    } else if (!refunds.length) {
+      refundsHtml = `<span class="te-cm-warn">Aucun avoir trouvé sur cette commande — probablement pas encore remboursé.</span>`;
+    } else {
+      refundsHtml = refunds.map((r) => {
+        const color = REFUND_STATE_COLORS[r.invoice_payment_state] || '#6c757d';
+        const isCurrent = r.id === move.id;
+        return `<div class="te-cm-refund-row">
+          <span class="te-cm-dot" style="background:${color};"></span>
+          Avoir <strong>${escapeHtml(r.name)}</strong>${isCurrent ? ' (celui-ci)' : ''} du ${fmtDate(r.invoice_date)} —
+          ${r.amount_total.toFixed(2)} € — état : ${escapeHtml(trLabel(MOVE_STATE_LABELS, r.state))} — paiement : ${escapeHtml(trLabel(PAYMENT_STATE_LABELS, r.invoice_payment_state))}
+        </div>`;
+      }).join('');
+    }
+
+    let notesHtml;
+    const noteBlocks = messages.map((m) => {
+      const text = stripHtml(m.body);
+      if (!text) return '';
+      const author = m.author_id ? m.author_id[1] : 'Inconnu';
+      return `<div class="te-cm-note">
+        <div class="te-cm-note-meta">${fmtDatetime(m.date)} — ${escapeHtml(author)}</div>
+        <div>${escapeHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</div>
+      </div>`;
+    }).filter(Boolean);
+    notesHtml = noteBlocks.length
+      ? noteBlocks.join('')
+      : `<span class="te-cm-warn" style="color:#888;">Aucune note récente sur la commande.</span>`;
+
+    return `
+      <div class="te-cm-section"><strong>🔁 Retour(s) correspondant(s)</strong><br>${retourHtml}</div>
+      <div class="te-cm-section"><strong>💶 Avoir(s) / remboursement sur la commande</strong><br>${refundsHtml}</div>
+      <div class="te-cm-section"><strong>📝 Dernières notes de la commande</strong>${notesHtml}</div>
+    `;
+  }
+
+  function ensureStyles() {
+    if (document.getElementById('te-cm-style')) return;
+    const style = document.createElement('style');
+    style.id = 'te-cm-style';
+    style.textContent = `
+      #${PANEL_ID} { position:fixed; top:150px; right:24px; width:340px; max-height:70vh;
+        background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
+        z-index:1030; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        display:flex; flex-direction:column; overflow:hidden; }
+      #${PANEL_ID}.te-cm-min { max-height:none; }
+      #${PANEL_ID}.te-cm-min .te-cm-body { display:none; }
+      #${PANEL_ID} .te-cm-head { background:#2e7d32; color:#fff; padding:10px 12px;
+        display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:move;
+        flex-shrink:0; user-select:none; touch-action:none; }
+      #${PANEL_ID} .te-cm-head b { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #${PANEL_ID} .te-cm-head-btns { display:flex; gap:4px; flex-shrink:0; }
+      #${PANEL_ID} .te-cm-iconbtn { cursor:pointer; color:#e3f0e4; font-size:14px; line-height:1;
+        width:22px; height:22px; display:flex; align-items:center; justify-content:center;
+        border-radius:4px; border:none; background:transparent; }
+      #${PANEL_ID} .te-cm-iconbtn:hover { color:#fff; background:rgba(255,255,255,.15); }
+      #${PANEL_ID} .te-cm-body { overflow-y:auto; padding:10px 14px; }
+      #${PANEL_ID} .te-cm-section { margin-top:8px; }
+      #${PANEL_ID} .te-cm-section:first-child { margin-top:0; }
+      #${PANEL_ID} .te-cm-warn { color:#856404; }
+      #${PANEL_ID} .te-cm-retour-row, #${PANEL_ID} .te-cm-refund-row { margin-bottom:3px; }
+      #${PANEL_ID} .te-cm-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; background:#2e7d32; }
+      #${PANEL_ID} .te-cm-note { margin-bottom:4px; padding-left:6px; border-left:2px solid #ddd; }
+      #${PANEL_ID} .te-cm-note-meta { font-size:11px; color:#888; }
+      #${PANEL_ID} .te-cm-loading, #${PANEL_ID} .te-cm-error { padding:10px 14px; font-size:13px; }
+      #${PANEL_ID} .te-cm-error { color:#dc3545; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function isMinPref() {
+    return sessionStorage.getItem('te_cm_min') === '1';
+  }
+  function setMinPref(min) {
+    sessionStorage.setItem('te_cm_min', min ? '1' : '0');
+  }
+  const closedForId = new Set();
+
+  function getOrCreatePanel() {
+    ensureStyles();
+    let panel = document.getElementById(PANEL_ID);
+    if (panel) return panel;
+
+    panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    panel.innerHTML = `
+      <div class="te-cm-head">
+        <b id="te-cm-title">🧾 Infos retour</b>
+        <div class="te-cm-head-btns">
+          <button class="te-cm-iconbtn" data-action="min" type="button" title="Réduire / restaurer">—</button>
+          <button class="te-cm-iconbtn" data-action="close" type="button" title="Fermer">✕</button>
+        </div>
+      </div>
+      <div class="te-cm-body" id="te-cm-body"></div>
+    `;
+    document.body.appendChild(panel);
+
+    if (isMinPref()) panel.classList.add('te-cm-min');
+
+    panel.querySelector('[data-action="min"]').addEventListener('click', () => {
+      const nowMin = !panel.classList.contains('te-cm-min');
+      panel.classList.toggle('te-cm-min', nowMin);
+      setMinPref(nowMin);
+    });
+    panel.querySelector('[data-action="close"]').addEventListener('click', () => {
+      const id = getMoveIdFromHash();
+      if (id) closedForId.add(id);
+      panel.remove();
+    });
+    panel.querySelector('.te-cm-head').addEventListener('dblclick', () => {
+      const nowMin = !panel.classList.contains('te-cm-min');
+      panel.classList.toggle('te-cm-min', nowMin);
+      setMinPref(nowMin);
+    });
+
+    return panel;
+  }
+
+  function removePanel() {
+    const existing = document.getElementById(PANEL_ID);
+    if (existing) existing.remove();
+  }
+
+  async function renderPanel(moveId) {
+    if (closedForId.has(moveId)) return;
+
+    let info;
+    try {
+      info = await fetchMoveInfo(moveId);
+    } catch (e) {
+      console.error('[TE-Compta] Erreur chargement infos avoir', e);
+      return;
+    }
+    if (getMoveIdFromHash() !== moveId || closedForId.has(moveId)) return;
+    if (!info.isRefund) { removePanel(); return; }
+
+    const panel = getOrCreatePanel();
+    const body = panel.querySelector('#te-cm-body');
+    panel.querySelector('#te-cm-title').textContent = `🧾 ${info.move.name || 'Avoir'}`;
+    body.innerHTML = buildBodyHtml(info);
+  }
+
+  let lastRenderedId = null;
+  let renderScheduled = false;
+
+  function scheduleTryRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    setTimeout(() => {
+      renderScheduled = false;
+      tryRender();
+    }, 250);
+  }
+
+  function tryRender() {
+    const id = getMoveIdFromHash();
     if (!id) {
       if (lastRenderedId !== null) { removePanel(); lastRenderedId = null; }
       return;
