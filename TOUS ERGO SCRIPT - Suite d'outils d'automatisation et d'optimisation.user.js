@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      4.6
+// @version      4.7
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -3213,30 +3213,84 @@ https://www.tousergo.com`,
     const PS_URL = 'https://www.tousergo.com';
     const ODOO_URL = 'https://tousergo.eggs-solutions.fr';
 
-    GM_registerMenuCommand('Levée de fiche : configurer la clé Webservice PrestaShop', () => {
-      const current = GM_getValue('te_ldf_ws_key', '');
-      const key = prompt('Clé Webservice PrestaShop (lecture seule, ressources addresses/customers) :', current);
-      if (key !== null) GM_setValue('te_ldf_ws_key', key.trim());
-    });
-
     function getWsKey() {
       return GM_getValue('te_ldf_ws_key', '');
     }
 
-    GM_registerMenuCommand('Levée de fiche : configurer mes identifiants Odoo', () => {
-      const currentLogin = GM_getValue('te_ldf_odoo_login', '');
-      const login = prompt('Identifiant Odoo (ton adresse email de connexion Odoo) :', currentLogin);
-      if (login === null) return;
-      const password = prompt('Mot de passe Odoo (stocké uniquement sur ce poste) :', '');
-      if (password === null) return;
-      const currentDb = GM_getValue('te_ldf_odoo_db', 'TOUSERGOS');
-      const db = prompt('Base de données Odoo :', currentDb);
-      if (db === null) return;
-      GM_setValue('te_ldf_odoo_login', login.trim());
-      GM_setValue('te_ldf_odoo_pwd', password);
-      GM_setValue('te_ldf_odoo_db', db.trim());
-      alert('Identifiants Odoo enregistrés sur ce poste.');
-    });
+    function openCredentialsModal() {
+      if (document.getElementById('te-ldf-creds-backdrop')) return;
+
+      const backdrop = document.createElement('div');
+      backdrop.id = 'te-ldf-creds-backdrop';
+      backdrop.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:2147483647; display:flex; align-items:center; justify-content:center; font-family:Arial,Helvetica,sans-serif;';
+
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff; border-radius:8px; max-width:440px; width:92%; max-height:85vh; overflow-y:auto; padding:22px 26px; position:relative; box-shadow:0 10px 40px rgba(0,0,0,.35); font-size:14px; color:#222;';
+
+      box.innerHTML = `
+        <button type="button" id="te-ldf-creds-close" style="position:absolute; top:8px; right:12px; cursor:pointer; font-size:20px; border:none; background:none; color:#888; line-height:1;">×</button>
+        <h2 style="margin:0 0 14px; font-size:17px;">Identifiants Levée de fiche</h2>
+
+        <label style="display:block; font-size:12px; font-weight:600; color:#555; margin-top:4px;">Clé Webservice PrestaShop <span style="font-weight:400; color:#888;">(lecture seule, addresses/customers)</span></label>
+        <input type="text" id="te-ldf-ws-key" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 12px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+
+        <hr style="border:none; border-top:1px solid #eee; margin:14px 0;">
+
+        <label style="display:block; font-size:12px; font-weight:600; color:#555;">Identifiant Odoo <span style="font-weight:400; color:#888;">(email de connexion)</span></label>
+        <input type="text" id="te-ldf-odoo-login" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 12px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+
+        <label style="display:block; font-size:12px; font-weight:600; color:#555;">Mot de passe Odoo <span style="font-weight:400; color:#888;">(stocké uniquement sur ce poste)</span></label>
+        <input type="password" id="te-ldf-odoo-pwd" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 6px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666; margin-bottom:12px; cursor:pointer;">
+          <input type="checkbox" id="te-ldf-odoo-pwd-show" style="cursor:pointer;"> Afficher le mot de passe
+        </label>
+
+        <label style="display:block; font-size:12px; font-weight:600; color:#555;">Base de données Odoo</label>
+        <input type="text" id="te-ldf-odoo-db" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 18px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" id="te-ldf-creds-cancel" style="padding:8px 16px; font-size:13px; border:1px solid #ccc; border-radius:5px; background:#fff; color:#444; cursor:pointer;">Annuler</button>
+          <button type="button" id="te-ldf-creds-save" style="padding:8px 18px; font-size:13px; font-weight:600; border:none; border-radius:5px; background:#25b9d7; color:#fff; cursor:pointer;">Enregistrer</button>
+        </div>
+      `;
+
+      backdrop.appendChild(box);
+      document.body.appendChild(backdrop);
+
+      const wsKeyInput = box.querySelector('#te-ldf-ws-key');
+      const loginInput = box.querySelector('#te-ldf-odoo-login');
+      const pwdInput = box.querySelector('#te-ldf-odoo-pwd');
+      const pwdShow = box.querySelector('#te-ldf-odoo-pwd-show');
+      const dbInput = box.querySelector('#te-ldf-odoo-db');
+
+      wsKeyInput.value = GM_getValue('te_ldf_ws_key', '');
+      loginInput.value = GM_getValue('te_ldf_odoo_login', '');
+      pwdInput.value = GM_getValue('te_ldf_odoo_pwd', '');
+      dbInput.value = GM_getValue('te_ldf_odoo_db', 'TOUSERGOS');
+
+      pwdShow.addEventListener('change', () => {
+        pwdInput.type = pwdShow.checked ? 'text' : 'password';
+      });
+
+      function closeModal() {
+        backdrop.remove();
+      }
+
+      box.querySelector('#te-ldf-creds-close').addEventListener('click', closeModal);
+      box.querySelector('#te-ldf-creds-cancel').addEventListener('click', closeModal);
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+
+      box.querySelector('#te-ldf-creds-save').addEventListener('click', () => {
+        GM_setValue('te_ldf_ws_key', wsKeyInput.value.trim());
+        GM_setValue('te_ldf_odoo_login', loginInput.value.trim());
+        GM_setValue('te_ldf_odoo_pwd', pwdInput.value);
+        GM_setValue('te_ldf_odoo_db', dbInput.value.trim() || 'TOUSERGOS');
+        closeModal();
+        alert('Identifiants enregistrés sur ce poste.');
+      });
+    }
+
+    GM_registerMenuCommand('Levée de fiche : configurer mes identifiants (PrestaShop + Odoo)', openCredentialsModal);
 
     function getOdooCreds() {
       return {
