@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.0.4
+// @version      5.1.0
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -20,6 +20,7 @@
 // @connect      www.laposte.fr
 // @connect      public.infra-prod.prod.cloud.fr.gls-group.com
 // @connect      mykn.kuehne-nagel.com
+// @connect      api.payplug.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setClipboard
 // @grant        GM_setValue
@@ -3248,6 +3249,14 @@ https://www.tousergo.com`,
         <label style="display:block; font-size:12px; font-weight:600; color:#555;">Base de données Odoo</label>
         <input type="text" id="te-ldf-odoo-db" readonly style="display:block; width:100%; box-sizing:border-box; margin:4px 0 18px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit; background:#f5f7f8; color:#666; cursor:not-allowed;">
 
+        <hr style="border:none; border-top:1px solid #eee; margin:14px 0;">
+
+        <label style="display:block; font-size:12px; font-weight:600; color:#555;">Clé secrète PayPlug <span style="font-weight:400; color:#888;">(pour le remboursement en 1 clic, stockée uniquement sur ce poste)</span></label>
+        <input type="password" id="te-ldf-payplug-key" style="display:block; width:100%; box-sizing:border-box; margin:4px 0 6px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666; margin-bottom:6px; cursor:pointer;">
+          <input type="checkbox" id="te-ldf-payplug-key-show" style="cursor:pointer;"> Afficher la clé
+        </label>
+
         <div style="display:flex; gap:10px; justify-content:flex-end;">
           <button type="button" id="te-ldf-creds-cancel" style="padding:8px 16px; font-size:13px; border:1px solid #ccc; border-radius:5px; background:#fff; color:#444; cursor:pointer;">Annuler</button>
           <button type="button" id="te-ldf-creds-save" style="padding:8px 18px; font-size:13px; font-weight:600; border:none; border-radius:5px; background:#25b9d7; color:#fff; cursor:pointer;">Enregistrer</button>
@@ -3262,11 +3271,18 @@ https://www.tousergo.com`,
       const pwdInput = box.querySelector('#te-ldf-odoo-pwd');
       const pwdShow = box.querySelector('#te-ldf-odoo-pwd-show');
       const dbInput = box.querySelector('#te-ldf-odoo-db');
+      const payplugKeyInput = box.querySelector('#te-ldf-payplug-key');
+      const payplugKeyShow = box.querySelector('#te-ldf-payplug-key-show');
 
       wsKeyInput.value = GM_getValue('te_ldf_ws_key', '');
       loginInput.value = GM_getValue('te_ldf_odoo_login', '');
       pwdInput.value = GM_getValue('te_ldf_odoo_pwd', '');
       dbInput.value = GM_getValue('te_ldf_odoo_db', 'TOUSERGOS');
+      payplugKeyInput.value = GM_getValue('te_ldf_payplug_key', '');
+
+      payplugKeyShow.addEventListener('change', () => {
+        payplugKeyInput.type = payplugKeyShow.checked ? 'text' : 'password';
+      });
 
       pwdShow.addEventListener('change', () => {
         pwdInput.type = pwdShow.checked ? 'text' : 'password';
@@ -3285,6 +3301,7 @@ https://www.tousergo.com`,
         GM_setValue('te_ldf_odoo_login', loginInput.value.trim());
         GM_setValue('te_ldf_odoo_pwd', pwdInput.value);
         GM_setValue('te_ldf_odoo_db', 'TOUSERGOS');
+        GM_setValue('te_ldf_payplug_key', payplugKeyInput.value.trim());
         closeModal();
         alert('Identifiants enregistrés sur ce poste.');
       });
@@ -4639,7 +4656,7 @@ https://www.tousergo.com`,
       ${trackingHtml ? `<div class="te-rt-section">${trackingHtml}</div>` : ''}
       <div class="te-rt-section"><strong>📍 Adresse de livraison</strong><br>${addrHtml}</div>
       <div class="te-rt-section"><strong>💶 Avoir(s) / remboursement</strong><br>${refundsHtml}</div>
-      <div class="te-rt-section"><strong>📝 Dernières notes de la commande</strong>${notesHtml}</div>
+      <div class="te-rt-section"><strong>📝 Dernières notes de la commande</strong><br>${notesHtml}</div>
     `;
   }
 
@@ -4838,9 +4855,13 @@ https://www.tousergo.com`,
     if (!statusbar) return;
     if (document.getElementById(REFUS_14J_BTN_ID)) return;
 
+    // On insère après le bloc .o_form_statusbar entier (et non juste après .o_statusbar_buttons,
+    // qui est en display:flex et plaçait le bouton à côté des autres au lieu d'en dessous).
+    const statusBarBlock = statusbar.closest('.o_form_statusbar') || statusbar;
+
     const wrap = document.createElement('div');
     wrap.id = 'te-rt-refus-14j-wrap';
-    wrap.style.cssText = 'width:100%; margin-top:22px; padding-top:14px; border-top:1px dashed rgba(0,0,0,.15);';
+    wrap.style.cssText = 'width:100%; margin-top:8px; padding:10px 0 0; border-top:1px dashed rgba(0,0,0,.15);';
 
     const btn = document.createElement('button');
     btn.id = REFUS_14J_BTN_ID;
@@ -4850,7 +4871,7 @@ https://www.tousergo.com`,
     btn.innerHTML = '<span>Retour refusé (délai 14 jours dépassé)</span>';
 
     wrap.appendChild(btn);
-    statusbar.insertAdjacentElement('afterend', wrap);
+    statusBarBlock.insertAdjacentElement('afterend', wrap);
 
     btn.addEventListener('click', async () => {
       const currentId = getRetourIdFromHash();
@@ -5039,6 +5060,9 @@ https://www.tousergo.com`,
   }
 
   const autoClosedRetourIds = new Set();
+  const lastPaymentStateByMoveId = new Map();
+  const refundEmailPromptedIds = new Set();
+  const REFUND_TEMPLATE_NAME = 'SC - REMBOURSEMENT SUITE RETOUR PRODUIT';
 
   async function fetchOrderTrackingLink(orderId) {
     try {
@@ -5057,6 +5081,94 @@ https://www.tousergo.com`,
     return null;
   }
 
+  function getPayplugKey() {
+    return GM_getValue('te_ldf_payplug_key', '');
+  }
+
+  function payplugRefund(transactionId, amountEuros) {
+    return new Promise((resolve, reject) => {
+      const key = getPayplugKey();
+      if (!key) {
+        reject(new Error('Clé PayPlug non configurée (menu Tampermonkey → "configurer mes identifiants").'));
+        return;
+      }
+      const amountCents = Math.round(amountEuros * 100);
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `https://api.payplug.com/v1/payments/${encodeURIComponent(transactionId)}/refunds`,
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'PayPlug-Version': '2019-08-06',
+        },
+        data: JSON.stringify({ amount: amountCents }),
+        onload: (res) => {
+          let data = null;
+          try { data = JSON.parse(res.responseText); } catch (e) { /* réponse non-JSON */ }
+          if (res.status >= 200 && res.status < 300) {
+            resolve(data);
+          } else {
+            reject(new Error((data && data.message) || `Erreur PayPlug (code ${res.status})`));
+          }
+        },
+        onerror: () => reject(new Error('Erreur réseau vers PayPlug (vérifie le @connect api.payplug.com).')),
+      });
+    });
+  }
+
+  async function computeReturnCoverage(moveId, orderId) {
+    if (!orderId) return null;
+    try {
+      const [moveData] = await odooCall('account.move', 'read', [[moveId], ['invoice_line_ids']]);
+      const [orderData] = await odooCall('sale.order', 'read', [[orderId], ['order_line']]);
+      if (!moveData || !orderData) return null;
+
+      const moveLines = moveData.invoice_line_ids && moveData.invoice_line_ids.length
+        ? await odooCall('account.move.line', 'read', [moveData.invoice_line_ids, ['product_id', 'quantity']])
+        : [];
+
+      let orderLines = [];
+      if (orderData.order_line && orderData.order_line.length) {
+        try {
+          orderLines = await odooCall('sale.order.line', 'read',
+            [orderData.order_line, ['product_id', 'product_uom_qty', 'is_delivery']]);
+        } catch (e) {
+          orderLines = await odooCall('sale.order.line', 'read',
+            [orderData.order_line, ['product_id', 'product_uom_qty']]);
+        }
+      }
+
+      const isShippingLabel = (label) => label && /transport|livraison|shipping|port/i.test(label);
+
+      const orderQtyByProduct = {};
+      orderLines.forEach((l) => {
+        if (!l.product_id) return;
+        const label = l.product_id[1] || '';
+        if (l.is_delivery || isShippingLabel(label)) return;
+        const pid = l.product_id[0];
+        orderQtyByProduct[pid] = (orderQtyByProduct[pid] || 0) + l.product_uom_qty;
+      });
+
+      const refundQtyByProduct = {};
+      moveLines.forEach((l) => {
+        if (!l.product_id) return;
+        const label = l.product_id[1] || '';
+        if (isShippingLabel(label)) return;
+        const pid = l.product_id[0];
+        refundQtyByProduct[pid] = (refundQtyByProduct[pid] || 0) + l.quantity;
+      });
+
+      const orderProductIds = Object.keys(orderQtyByProduct);
+      if (!orderProductIds.length) return null;
+
+      const isTotal = orderProductIds.every((pid) => (refundQtyByProduct[pid] || 0) >= orderQtyByProduct[pid]);
+      return isTotal ? 'total' : 'partial';
+    } catch (e) {
+      console.warn('[TE-Compta] Comparaison retour partiel/total impossible', e);
+      return null;
+    }
+  }
+
   async function fetchMoveInfo(moveId) {
     let move;
     try {
@@ -5070,6 +5182,13 @@ https://www.tousergo.com`,
     }
 
     const isRefund = move.move_type === 'out_refund';
+
+    const prevPaymentState = lastPaymentStateByMoveId.get(moveId);
+    lastPaymentStateByMoveId.set(moveId, move.invoice_payment_state);
+    // On ne propose le mail que si on a VU la transition se produire pendant cette session
+    // (donc pas au premier chargement d'un avoir déjà payé auparavant).
+    const justGotPaid = isRefund && move.invoice_payment_state === 'paid'
+      && prevPaymentState && prevPaymentState !== 'paid';
 
     const fieldName = await detectRefPrestaField();
     let refPrestashop = null;
@@ -5087,7 +5206,7 @@ https://www.tousergo.com`,
       try {
         retours = await odooCall('eggs.presta.retour', 'search_read',
           [[['ref_prestashop', '=', refPrestashop]]],
-          { fields: ['statut_retour_id', 'create_date', 'order_id', 'retour_cloture', 'motif_retour2'], limit: 10 });
+          { fields: ['statut_retour_id', 'create_date', 'order_id', 'retour_cloture', 'motif_retour', 'motif_retour2'], limit: 10 });
       } catch (e) {
         console.warn('[TE-Compta] Recherche des retours impossible', e);
       }
@@ -5160,10 +5279,21 @@ https://www.tousergo.com`,
       }
     }
 
-    return { move, isRefund, refPrestashop, retours, orderId, refunds, messages };
+    let payplugTransactionId = null;
+    try {
+      const [withTx] = await odooCall('account.move', 'read', [[moveId], ['eggs_id_transaction']]);
+      const txId = withTx ? withTx.eggs_id_transaction : null;
+      if (txId && /^pay_/.test(txId)) payplugTransactionId = txId;
+    } catch (e) {
+      // champ absent sur cette instance, on ignore silencieusement
+    }
+
+    const returnCoverage = orderId ? await computeReturnCoverage(moveId, orderId) : null;
+
+    return { move, isRefund, refPrestashop, retours, orderId, refunds, messages, returnCoverage, justGotPaid, payplugTransactionId };
   }
 
-  function buildBodyHtml({ move, isRefund, refPrestashop, retours, orderId, refunds, messages }) {
+  function buildBodyHtml({ move, isRefund, refPrestashop, retours, orderId, refunds, messages, returnCoverage, payplugTransactionId }) {
     let retourHtml;
     if (!refPrestashop) {
       retourHtml = `<span class="te-cm-warn">Référence PrestaShop introuvable sur cet avoir.</span>`;
@@ -5172,6 +5302,9 @@ https://www.tousergo.com`,
     } else {
       retourHtml = retours.map((r) => {
         const statut = r.statut_retour_id ? r.statut_retour_id[1] : 'n/a';
+        const motifClientHtml = r.motif_retour
+          ? `<div class="te-cm-motif-brut">💬 Motif client : « ${escapeHtml(r.motif_retour)} »</div>`
+          : '';
         const motif = r.motif_retour2 ? r.motif_retour2[1] : null;
         const isTransportIssue = motif && /transport/i.test(motif);
         const motifHtml = motif
@@ -5189,6 +5322,7 @@ https://www.tousergo.com`,
         return `<div class="te-cm-retour-row">
           <span class="te-cm-dot"></span>
           Retour du <strong>${escapeHtml(fmtDatetime(r.create_date) || '')}</strong> — statut : <strong>${escapeHtml(statut)}</strong>
+          ${motifClientHtml}
           ${motifHtml}
           ${trackingHtml}
           ${autoClosedHtml}
@@ -5227,10 +5361,31 @@ https://www.tousergo.com`,
       ? noteBlocks.join('')
       : `<span class="te-cm-warn" style="color:#888;">Aucune note récente sur la commande.</span>`;
 
+    let coverageHtml = '';
+    if (returnCoverage === 'total') {
+      coverageHtml = `<div class="te-cm-section"><div class="te-cm-coverage te-cm-coverage-total">📦 Retour <strong>total</strong> — rembourser les frais de port</div></div>`;
+    } else if (returnCoverage === 'partial') {
+      coverageHtml = `<div class="te-cm-section"><div class="te-cm-coverage te-cm-coverage-partial">📦 Retour <strong>partiel</strong> — ne pas rembourser les frais de port (service rendu)</div></div>`;
+    }
+
+    let payplugHtml = '';
+    if (payplugTransactionId) {
+      payplugHtml = `<div class="te-cm-section">
+        <strong>💳 Paiement</strong><br>
+        <button type="button" class="te-cm-payplug-btn" data-action="payplug-refund"
+          data-txid="${escapeHtml(payplugTransactionId)}" data-amount="${move.amount_total.toFixed(2)}">
+          💳 Rembourser ${move.amount_total.toFixed(2)} € sur PayPlug
+        </button>
+        <span class="te-cm-payplug-status" id="te-cm-payplug-status"></span>
+      </div>`;
+    }
+
     return `
+      ${coverageHtml}
       <div class="te-cm-section"><strong>🔁 Retour(s) correspondant(s)</strong><br>${retourHtml}</div>
       <div class="te-cm-section"><strong>💶 Avoir(s) / remboursement sur la commande</strong><br>${refundsHtml}</div>
-      <div class="te-cm-section"><strong>📝 Dernières notes de la commande</strong>${notesHtml}</div>
+      ${payplugHtml}
+      <div class="te-cm-section"><strong>📝 Dernières notes de la commande</strong><br>${notesHtml}</div>
     `;
   }
 
@@ -5257,15 +5412,23 @@ https://www.tousergo.com`,
       #${PANEL_ID} .te-cm-body { overflow-y:auto; padding:10px 14px; }
       #${PANEL_ID} .te-cm-section { margin-top:8px; }
       #${PANEL_ID} .te-cm-section:first-child { margin-top:0; }
+      #${PANEL_ID} .te-cm-coverage { padding:7px 10px; border-radius:6px; font-size:12px; font-weight:600; }
+      #${PANEL_ID} .te-cm-coverage-total { background:#e3f2e3; color:#1e6b1e; }
+      #${PANEL_ID} .te-cm-coverage-partial { background:#fdeee7; color:#a34a1f; }
       #${PANEL_ID} .te-cm-warn { color:#856404; }
       #${PANEL_ID} .te-cm-retour-row, #${PANEL_ID} .te-cm-refund-row { margin-bottom:3px; }
       #${PANEL_ID} .te-cm-motif { margin-top:4px; font-size:11.5px; padding:5px 8px; border-radius:5px; }
+      #${PANEL_ID} .te-cm-motif-brut { margin-top:4px; font-size:11.5px; color:#444; font-style:italic; }
       #${PANEL_ID} .te-cm-motif-transport { background:#fff3e0; color:#8a5a00; }
       #${PANEL_ID} .te-cm-motif-client { background:#e8f4fd; color:#0a5a8a; }
       #${PANEL_ID} .te-cm-hint { display:block; font-size:10.5px; color:#8a6d00; margin-top:2px; font-style:italic; }
       #${PANEL_ID} .te-cm-track-btn { display:inline-block; margin-top:4px; padding:3px 10px; background:#714B67;
         color:#fff; border-radius:4px; text-decoration:none; font-size:11.5px; }
       #${PANEL_ID} .te-cm-autoclose { margin-top:4px; font-size:11.5px; color:#2e7d32; font-weight:600; }
+      #${PANEL_ID} .te-cm-payplug-btn { padding:7px 12px; font-size:12px; font-weight:600; border:none;
+        border-radius:6px; background:#5A31F4; color:#fff; cursor:pointer; }
+      #${PANEL_ID} .te-cm-payplug-btn:disabled { opacity:.6; cursor:default; }
+      #${PANEL_ID} .te-cm-payplug-status { display:block; margin-top:6px; font-size:11.5px; }
       #${PANEL_ID} .te-cm-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; background:#2e7d32; }
       #${PANEL_ID} .te-cm-note { margin-bottom:4px; padding-left:6px; border-left:2px solid #ddd; }
       #${PANEL_ID} .te-cm-note-meta { font-size:11px; color:#888; }
@@ -5359,6 +5522,29 @@ https://www.tousergo.com`,
 
     makeDraggable(panel, panel.querySelector('.te-cm-head'));
 
+    panel.querySelector('#te-cm-body').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-action="payplug-refund"]');
+      if (!btn) return;
+      const txId = btn.dataset.txid;
+      const amount = parseFloat(btn.dataset.amount);
+      if (!confirm(`Confirmer le remboursement de ${amount.toFixed(2)} € sur PayPlug (transaction ${txId}) ?`)) return;
+
+      const statusEl = panel.querySelector('#te-cm-payplug-status');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Remboursement en cours…';
+
+      try {
+        await payplugRefund(txId, amount);
+        btn.textContent = '✓ Remboursé sur PayPlug';
+        if (statusEl) statusEl.innerHTML = '<span style="color:#2e7d32">✓ Remboursement PayPlug effectué.</span>';
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        if (statusEl) statusEl.innerHTML = `<span style="color:#c00">${escapeHtml(err.message)}</span>`;
+      }
+    });
+
     panel.querySelector('[data-action="min"]').addEventListener('click', () => {
       const nowMin = !panel.classList.contains('te-cm-min');
       panel.classList.toggle('te-cm-min', nowMin);
@@ -5383,24 +5569,125 @@ https://www.tousergo.com`,
     if (existing) existing.remove();
   }
 
+  async function showRefundEmailModal(template, targetModel, resId) {
+    if (document.getElementById('te-cm-refund-email-backdrop')) return;
+
+    let rendered;
+    try {
+      const genResult = await odooCall('mail.template', 'generate_email',
+        [[template.id], [resId]], { fields: ['subject', 'body_html'] });
+      rendered = genResult && genResult[resId];
+    } catch (e) {
+      console.warn('[TE-Compta] Préparation du mail de remboursement impossible', e);
+      rendered = null;
+    }
+    if (!rendered) {
+      alert(`Impossible de préparer le mail "${REFUND_TEMPLATE_NAME}". Voir la console (F12) pour le détail.`);
+      return;
+    }
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'te-cm-refund-email-backdrop';
+    backdrop.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:2147483647; display:flex; align-items:center; justify-content:center; font-family:Arial,Helvetica,sans-serif;';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff; border-radius:8px; max-width:560px; width:94%; max-height:85vh; overflow-y:auto; padding:22px 26px; position:relative; box-shadow:0 10px 40px rgba(0,0,0,.35); font-size:14px; color:#222;';
+    box.innerHTML = `
+      <h2 style="margin:0 0 6px; font-size:17px;">Mail de remboursement au client</h2>
+      <p style="margin:0 0 14px; font-size:12px; color:#777;">Modèle : ${escapeHtml(REFUND_TEMPLATE_NAME)} — vérifie le contenu avant d'envoyer.</p>
+      <label style="display:block; font-size:12px; font-weight:600; color:#555;">Sujet</label>
+      <input type="text" id="te-cm-refund-subject" value="${escapeHtml(rendered.subject || '')}"
+        style="display:block; width:100%; box-sizing:border-box; margin:4px 0 12px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
+      <label style="display:block; font-size:12px; font-weight:600; color:#555;">Message</label>
+      <div id="te-cm-refund-body" contenteditable="true"
+        style="min-height:180px; max-height:340px; overflow-y:auto; border:1px solid #d5dde0; border-radius:4px; padding:10px; margin:4px 0 16px; font-size:13px; line-height:1.5;">${rendered.body_html || ''}</div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" id="te-cm-refund-cancel" style="padding:8px 16px; font-size:13px; border:1px solid #ccc; border-radius:5px; background:#fff; color:#444; cursor:pointer;">Ne pas envoyer</button>
+        <button type="button" id="te-cm-refund-send" style="padding:8px 18px; font-size:13px; font-weight:600; border:none; border-radius:5px; background:#2e7d32; color:#fff; cursor:pointer;">✉️ Envoyer au client</button>
+      </div>
+      <div id="te-cm-refund-status" style="margin-top:10px; font-size:12.5px;"></div>
+    `;
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+
+    function closeModal() { backdrop.remove(); }
+    box.querySelector('#te-cm-refund-cancel').addEventListener('click', closeModal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+
+    box.querySelector('#te-cm-refund-send').addEventListener('click', async () => {
+      const sendBtn = box.querySelector('#te-cm-refund-send');
+      const statusEl = box.querySelector('#te-cm-refund-status');
+      const subject = box.querySelector('#te-cm-refund-subject').value.trim();
+      const bodyHtml = box.querySelector('#te-cm-refund-body').innerHTML;
+
+      if (!subject || !bodyHtml.replace(/<[^>]+>/g, '').trim()) {
+        statusEl.innerHTML = '<span style="color:#c00">Le sujet et le message ne peuvent pas être vides.</span>';
+        return;
+      }
+
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Envoi en cours…';
+      statusEl.textContent = '';
+
+      try {
+        // message_post notifie automatiquement les abonnés du dossier (dont le client), pas besoin
+        // de préciser partner_ids tant que le client est déjà abonné à la commande/facture.
+        await odooCall(targetModel, 'message_post', [[resId]], {
+          subject, body: bodyHtml, message_type: 'comment', subtype_xmlid: 'mail.mt_comment',
+        });
+        statusEl.innerHTML = '<span style="color:#2e7d32">✓ Mail envoyé au client.</span>';
+        setTimeout(closeModal, 1200);
+      } catch (e) {
+        statusEl.innerHTML = `<span style="color:#c00">Échec de l'envoi : ${escapeHtml(e.message)}</span>`;
+        sendBtn.disabled = false;
+        sendBtn.textContent = '✉️ Envoyer au client';
+      }
+    });
+  }
+
+  async function maybePromptRefundEmail(moveId, info) {
+    if (!info.justGotPaid || refundEmailPromptedIds.has(moveId)) return;
+    refundEmailPromptedIds.add(moveId);
+    try {
+      const templates = await odooCall('mail.template', 'search_read',
+        [[['name', '=', REFUND_TEMPLATE_NAME]]], { fields: ['id', 'model'], limit: 1 });
+      const template = templates && templates[0];
+      if (!template) {
+        console.warn(`[TE-Compta] Modèle mail introuvable : "${REFUND_TEMPLATE_NAME}"`);
+        return;
+      }
+      let targetModel = template.model || 'sale.order';
+      let resId = targetModel === 'account.move' ? moveId : info.orderId;
+      if (!resId) { targetModel = 'account.move'; resId = moveId; }
+      await showRefundEmailModal(template, targetModel, resId);
+    } catch (e) {
+      console.warn('[TE-Compta] Préparation du mail de remboursement impossible', e);
+    }
+  }
+
   async function renderPanel(moveId) {
     if (closedForId.has(moveId)) return;
+
+    const panel = getOrCreatePanel();
+    const body = panel.querySelector('#te-cm-body');
+    body.innerHTML = `<div class="te-cm-loading">Chargement des infos avoir…</div>`;
 
     let info;
     try {
       info = await fetchMoveInfo(moveId);
     } catch (e) {
       console.error('[TE-Compta] Erreur chargement infos avoir', e);
+      if (getMoveIdFromHash() !== moveId || closedForId.has(moveId)) return;
+      body.innerHTML = `<div class="te-cm-error">⚠️ Impossible de charger les infos (${escapeHtml(e.message)}). Voir la console (F12) pour le détail.</div>`;
       return;
     }
     if (getMoveIdFromHash() !== moveId || closedForId.has(moveId)) return;
     if (!info.isRefund) { removePanel(); return; }
 
-    const panel = getOrCreatePanel();
-    const body = panel.querySelector('#te-cm-body');
     const titleRef = info.refPrestashop || (info.move.name && info.move.name !== '/' ? info.move.name : 'Avoir');
     panel.querySelector('#te-cm-title').textContent = `🧾 ${titleRef}`;
     body.innerHTML = buildBodyHtml(info);
+    maybePromptRefundEmail(moveId, info);
   }
 
   let lastRenderedId = null;
