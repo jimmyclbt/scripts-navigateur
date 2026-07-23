@@ -4648,7 +4648,7 @@ https://www.tousergo.com`,
     const style = document.createElement('style');
     style.id = 'te-rt-style';
     style.textContent = `
-      #${PANEL_ID} { position:fixed; top:200px; right:24px; width:340px; max-height:70vh;
+      #${PANEL_ID} { position:fixed; top:230px; right:24px; width:340px; max-height:70vh;
         background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
         z-index:1030; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
         display:flex; flex-direction:column; overflow:hidden; }
