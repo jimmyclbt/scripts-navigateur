@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.0.2
+// @version      5.0.3
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4648,7 +4648,7 @@ https://www.tousergo.com`,
     const style = document.createElement('style');
     style.id = 'te-rt-style';
     style.textContent = `
-      #${PANEL_ID} { position:fixed; top:150px; right:24px; width:340px; max-height:70vh;
+      #${PANEL_ID} { position:fixed; top:200px; right:24px; width:340px; max-height:70vh;
         background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
         z-index:1030; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
         display:flex; flex-direction:column; overflow:hidden; }
@@ -4840,7 +4840,7 @@ https://www.tousergo.com`,
 
     const wrap = document.createElement('div');
     wrap.id = 'te-rt-refus-14j-wrap';
-    wrap.style.cssText = 'width:100%; margin-top:6px;';
+    wrap.style.cssText = 'width:100%; margin-top:22px; padding-top:14px; border-top:1px dashed rgba(0,0,0,.15);';
 
     const btn = document.createElement('button');
     btn.id = REFUS_14J_BTN_ID;
@@ -4868,14 +4868,17 @@ https://www.tousergo.com`,
         if (!template) throw new Error(`Modèle mail introuvable : "${REFUS_14J_TEMPLATE_NAME}"`);
 
         let resId = currentId;
-        if (template.model && template.model !== 'eggs.presta.retour') {
+        let targetModel = template.model || 'eggs.presta.retour';
+        if (targetModel !== 'eggs.presta.retour') {
           const [retour] = await odooCall('eggs.presta.retour', 'read', [[currentId], ['order_id']]);
           const orderRel = retour ? retour.order_id : null;
           resId = Array.isArray(orderRel) ? orderRel[0] : orderRel;
           if (!resId) throw new Error("Commande introuvable pour ce retour");
         }
 
-        await odooCall('mail.template', 'send_mail', [template.id, resId], { force_send: true });
+        // message_post_with_template poste le message dans le chatter ET envoie réellement le mail
+        // (contrairement à mail.template.send_mail qui envoie seulement un mail brut sans trace au chatter)
+        await odooCall(targetModel, 'message_post_with_template', [[resId], template.id], {});
         btn.innerHTML = '<span>✓ Mail envoyé</span>';
         setTimeout(() => { btn.innerHTML = originalHtml; btn.disabled = false; }, 4000);
       } catch (e) {
@@ -5035,6 +5038,25 @@ https://www.tousergo.com`,
     return refPrestaFieldName;
   }
 
+  const autoClosedRetourIds = new Set();
+
+  async function fetchOrderTrackingLink(orderId) {
+    try {
+      const [order] = await odooCall('sale.order', 'read', [[orderId], ['picking_ids']]);
+      if (!order || !order.picking_ids || !order.picking_ids.length) return null;
+      const pickings = await odooCall('stock.picking', 'read', [
+        order.picking_ids, ['carrier_tracking_ref', 'carrier_tracking_url', 'state', 'date_done'],
+      ]);
+      const picking = pickings.find((p) => p.state === 'done' && p.date_done) || pickings.find((p) => p.date_done) || pickings[0];
+      if (picking && picking.carrier_tracking_url) {
+        return { url: picking.carrier_tracking_url, ref: picking.carrier_tracking_ref };
+      }
+    } catch (e) {
+      console.warn('[TE-Compta] Lecture suivi commande impossible', e);
+    }
+    return null;
+  }
+
   async function fetchMoveInfo(moveId) {
     let move;
     try {
@@ -5065,7 +5087,7 @@ https://www.tousergo.com`,
       try {
         retours = await odooCall('eggs.presta.retour', 'search_read',
           [[['ref_prestashop', '=', refPrestashop]]],
-          { fields: ['statut_retour_id', 'create_date', 'order_id'], limit: 10 });
+          { fields: ['statut_retour_id', 'create_date', 'order_id', 'retour_cloture', 'motif_retour2'], limit: 10 });
       } catch (e) {
         console.warn('[TE-Compta] Recherche des retours impossible', e);
       }
@@ -5079,6 +5101,31 @@ https://www.tousergo.com`,
         if (orders.length) orderId = orders[0].id;
       } catch (e) {
         console.warn('[TE-Compta] Recherche commande via invoice_origin impossible', e);
+      }
+    }
+
+    // Lien de suivi transporteur de la commande d'origine, pour vérifier le motif (client vs transporteur)
+    if (retours.length) {
+      const trackingLink = await fetchOrderTrackingLink(retours[0].order_id ? retours[0].order_id[0] : orderId);
+      retours.forEach((r) => { r._trackingLink = trackingLink; });
+    }
+
+    // Clôture automatique du retour : uniquement si un retour correspondant existe déjà (donc pas
+    // lors de la création d'un avoir directement depuis une commande, sans retour en cours),
+    // et seulement lorsque l'avoir est comptabilisé (posted) ET le paiement enregistré (paid).
+    if (isRefund && move.state === 'posted' && move.invoice_payment_state === 'paid' && retours.length) {
+      for (const r of retours) {
+        if (r.retour_cloture || autoClosedRetourIds.has(r.id)) continue;
+        autoClosedRetourIds.add(r.id);
+        try {
+          await odooCall('eggs.presta.retour', 'action_cloturer', [[r.id]], {});
+          r.retour_cloture = true;
+          r._autoClosed = true;
+          if (r.statut_retour_id) r.statut_retour_id = [r.statut_retour_id[0], 'Retour clôturé'];
+        } catch (e) {
+          console.warn('[TE-Compta] Clôture automatique du retour impossible', e);
+          autoClosedRetourIds.delete(r.id);
+        }
       }
     }
 
@@ -5125,9 +5172,26 @@ https://www.tousergo.com`,
     } else {
       retourHtml = retours.map((r) => {
         const statut = r.statut_retour_id ? r.statut_retour_id[1] : 'n/a';
+        const motif = r.motif_retour2 ? r.motif_retour2[1] : null;
+        const isTransportIssue = motif && /transport/i.test(motif);
+        const motifHtml = motif
+          ? `<div class="te-cm-motif ${isTransportIssue ? 'te-cm-motif-transport' : 'te-cm-motif-client'}">
+              ${isTransportIssue ? '🚚' : '🙋'} Motif TousErgo : <strong>${escapeHtml(motif)}</strong>
+              ${isTransportIssue ? '<span class="te-cm-hint">Vérifier le suivi : colis refusé/non retiré par le client (décote) ou retourné sans raison par le transporteur (pas de décote)</span>' : ''}
+            </div>`
+          : '';
+        const trackingHtml = r._trackingLink
+          ? `<a href="${r._trackingLink.url}" target="_blank" class="te-cm-track-btn">📦 Suivi transporteur commande</a>`
+          : '';
+        const autoClosedHtml = r._autoClosed
+          ? `<div class="te-cm-autoclose">✅ Retour clôturé automatiquement (avoir comptabilisé et payé)</div>`
+          : '';
         return `<div class="te-cm-retour-row">
           <span class="te-cm-dot"></span>
           Retour du <strong>${escapeHtml(fmtDatetime(r.create_date) || '')}</strong> — statut : <strong>${escapeHtml(statut)}</strong>
+          ${motifHtml}
+          ${trackingHtml}
+          ${autoClosedHtml}
         </div>`;
       }).join('');
     }
@@ -5175,7 +5239,7 @@ https://www.tousergo.com`,
     const style = document.createElement('style');
     style.id = 'te-cm-style';
     style.textContent = `
-      #${PANEL_ID} { position:fixed; top:150px; right:24px; width:340px; max-height:70vh;
+      #${PANEL_ID} { position:fixed; top:200px; right:24px; width:340px; max-height:70vh;
         background:#fff; border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.18);
         z-index:1030; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
         display:flex; flex-direction:column; overflow:hidden; }
@@ -5195,6 +5259,13 @@ https://www.tousergo.com`,
       #${PANEL_ID} .te-cm-section:first-child { margin-top:0; }
       #${PANEL_ID} .te-cm-warn { color:#856404; }
       #${PANEL_ID} .te-cm-retour-row, #${PANEL_ID} .te-cm-refund-row { margin-bottom:3px; }
+      #${PANEL_ID} .te-cm-motif { margin-top:4px; font-size:11.5px; padding:5px 8px; border-radius:5px; }
+      #${PANEL_ID} .te-cm-motif-transport { background:#fff3e0; color:#8a5a00; }
+      #${PANEL_ID} .te-cm-motif-client { background:#e8f4fd; color:#0a5a8a; }
+      #${PANEL_ID} .te-cm-hint { display:block; font-size:10.5px; color:#8a6d00; margin-top:2px; font-style:italic; }
+      #${PANEL_ID} .te-cm-track-btn { display:inline-block; margin-top:4px; padding:3px 10px; background:#714B67;
+        color:#fff; border-radius:4px; text-decoration:none; font-size:11.5px; }
+      #${PANEL_ID} .te-cm-autoclose { margin-top:4px; font-size:11.5px; color:#2e7d32; font-weight:600; }
       #${PANEL_ID} .te-cm-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; background:#2e7d32; }
       #${PANEL_ID} .te-cm-note { margin-bottom:4px; padding-left:6px; border-left:2px solid #ddd; }
       #${PANEL_ID} .te-cm-note-meta { font-size:11px; color:#888; }
@@ -5211,6 +5282,52 @@ https://www.tousergo.com`,
     sessionStorage.setItem('te_cm_min', min ? '1' : '0');
   }
   const closedForId = new Set();
+
+  function savePanelPosition(left, top) {
+    try { sessionStorage.setItem('te_cm_pos', JSON.stringify({ left, top })); } catch (e) {}
+  }
+  function loadPanelPosition() {
+    try {
+      const raw = sessionStorage.getItem('te_cm_pos');
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function makeDraggable(panel, head) {
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    head.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.te-cm-iconbtn')) return;
+      dragging = true;
+      const rect = panel.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      panel.style.left = rect.left + 'px';
+      panel.style.top = rect.top + 'px';
+      panel.style.right = 'auto';
+      head.setPointerCapture(e.pointerId);
+    });
+
+    head.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const maxLeft = window.innerWidth - panel.offsetWidth - 4;
+      const maxTop = window.innerHeight - 40;
+      const newLeft = Math.max(4, Math.min(e.clientX - offsetX, maxLeft));
+      const newTop = Math.max(4, Math.min(e.clientY - offsetY, maxTop));
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+    });
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      savePanelPosition(parseInt(panel.style.left, 10), parseInt(panel.style.top, 10));
+    }
+    head.addEventListener('pointerup', endDrag);
+    head.addEventListener('pointercancel', endDrag);
+  }
 
   function getOrCreatePanel() {
     ensureStyles();
@@ -5231,7 +5348,16 @@ https://www.tousergo.com`,
     `;
     document.body.appendChild(panel);
 
+    const savedPos = loadPanelPosition();
+    if (savedPos) {
+      panel.style.left = savedPos.left + 'px';
+      panel.style.top = savedPos.top + 'px';
+      panel.style.right = 'auto';
+    }
+
     if (isMinPref()) panel.classList.add('te-cm-min');
+
+    makeDraggable(panel, panel.querySelector('.te-cm-head'));
 
     panel.querySelector('[data-action="min"]').addEventListener('click', () => {
       const nowMin = !panel.classList.contains('te-cm-min');
@@ -5272,7 +5398,8 @@ https://www.tousergo.com`,
 
     const panel = getOrCreatePanel();
     const body = panel.querySelector('#te-cm-body');
-    panel.querySelector('#te-cm-title').textContent = `🧾 ${info.move.name || 'Avoir'}`;
+    const titleRef = info.refPrestashop || (info.move.name && info.move.name !== '/' ? info.move.name : 'Avoir');
+    panel.querySelector('#te-cm-title').textContent = `🧾 ${titleRef}`;
     body.innerHTML = buildBodyHtml(info);
   }
 
