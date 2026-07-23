@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.0.1
+// @version      5.0.2
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -5007,11 +5007,27 @@ https://www.tousergo.com`,
   async function detectRefPrestaField() {
     if (refPrestaFieldChecked) return refPrestaFieldName;
     refPrestaFieldChecked = true;
+
+    // Nom de champ connu sur account.move (onglet "Prestashop" > "Reference de la commande")
+    const candidates = ['eggs_ref_commande', 'ref_prestashop', 'x_ref_prestashop'];
+    for (const candidate of candidates) {
+      try {
+        const fields = await odooCall('account.move', 'fields_get', [[candidate]], {});
+        if (fields && fields[candidate]) {
+          refPrestaFieldName = candidate;
+          return refPrestaFieldName;
+        }
+      } catch (e) {
+        // champ inexistant sur ce modèle, on essaie le suivant
+      }
+    }
+
+    // Repli : recherche par nom technique ou libellé si aucun candidat connu ne correspond
     try {
       const fields = await odooCall('account.move', 'fields_get', [], { attributes: ['string'] });
       const keys = Object.keys(fields);
-      refPrestaFieldName = keys.find((k) => /prestashop/i.test(k))
-        || keys.find((k) => fields[k].string && /prestashop/i.test(fields[k].string))
+      refPrestaFieldName = keys.find((k) => /ref_commande|prestashop/i.test(k))
+        || keys.find((k) => fields[k].string && /prestashop|référence de la commande|reference de la commande/i.test(fields[k].string))
         || null;
     } catch (e) {
       console.warn('[TE-Compta] Détection du champ référence PrestaShop impossible', e);
@@ -5020,16 +5036,15 @@ https://www.tousergo.com`,
   }
 
   async function fetchMoveInfo(moveId) {
-    const moveTypeField = 'move_type';
     let move;
     try {
       [move] = await odooCall('account.move', 'read', [[moveId],
-        [moveTypeField, 'name', 'state', 'invoice_origin', 'amount_total', 'invoice_payment_state']]);
-    } catch (e) {
-      // Compat Odoo < 13.0 SaaS : champ "type" au lieu de "move_type"
-      [move] = await odooCall('account.move', 'read', [[moveId],
         ['type', 'name', 'state', 'invoice_origin', 'amount_total', 'invoice_payment_state']]);
       move.move_type = move.type;
+    } catch (e) {
+      // Compat future migration Odoo 14+ : champ "move_type" au lieu de "type"
+      [move] = await odooCall('account.move', 'read', [[moveId],
+        ['move_type', 'name', 'state', 'invoice_origin', 'amount_total', 'invoice_payment_state']]);
     }
 
     const isRefund = move.move_type === 'out_refund';
@@ -5073,9 +5088,17 @@ https://www.tousergo.com`,
       try {
         const [order] = await odooCall('sale.order', 'read', [[orderId], ['invoice_ids']]);
         if (order && order.invoice_ids && order.invoice_ids.length) {
-          const moves = await odooCall('account.move', 'read', [
-            order.invoice_ids, ['name', 'move_type', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
-          ]);
+          let moves;
+          try {
+            moves = await odooCall('account.move', 'read', [
+              order.invoice_ids, ['name', 'type', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
+            ]);
+            moves.forEach((m) => { m.move_type = m.type; });
+          } catch (e) {
+            moves = await odooCall('account.move', 'read', [
+              order.invoice_ids, ['name', 'move_type', 'invoice_date', 'amount_total', 'state', 'invoice_payment_state'],
+            ]);
+          }
           refunds = moves.filter((m) => m.move_type === 'out_refund');
         }
       } catch (e) {
