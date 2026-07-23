@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      4.2
+// @version      4.5
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -80,6 +80,30 @@
         priorityGroupValues: ['69', '26', '67'],
         defaultEncours: 5000,
         validationPresets: [
+          {
+            id: 'demande-info',
+            label: 'Demande SIRET / Mail compta',
+            shortLabel: 'Demande SIRET/compta',
+            groupValue: '26',
+            encours: 0,
+            delai: 0,
+            emailSubject: 'Informations complémentaires pour la création de votre compte professionnel',
+            emailBody:
+`Bonjour,
+
+Nous avons bien reçu votre demande d'ouverture de compte professionnel sur tousergo.com.
+
+Afin de pouvoir finaliser l'ouverture de votre compte, pourriez-vous nous transmettre les informations complémentaires suivantes :
+➡️ Votre numéro SIRET
+➡️ L'adresse e-mail de votre service comptabilité (pour l'envoi des factures)
+
+Dans l'attente de ces informations, votre compte a été configuré en accès professionnel avant expédition.
+
+Nous restons à votre disposition et vous souhaitons une bonne journée.
+
+L'équipe TOUS ERGO
+https://www.tousergo.com`,
+          },
           {
             id: 'pro0-avt',
             label: 'Pro – 0 % - Avant expédition',
@@ -278,19 +302,257 @@ https://www.tousergo.com`,
       }
     }
 
+    // Table de correspondance code NAF/APE -> libellé simplifié.
+    // Sert de secours quand l'API ne renvoie pas déjà le libellé (champ libelle_activite_principale).
+    // Couverture volontairement renforcée sur le commerce, la santé/action sociale et le secteur
+    // public/associatif, qui représentent l'essentiel des clients TOUS ERGO.
     const NAF_FALLBACK = {
-      '8710A': 'Hébergement médicalisé pour personnes âgées (EHPAD)',
-      '8710C': 'Hébergement médicalisé pour adultes handicapés et autres hébergements médicalisés',
-      '8730A': 'Hébergement social pour personnes âgées',
-      '8730B': 'Hébergement social pour handicapés physiques',
-      '8610Z': 'Activités hospitalières',
-      '8621Z': 'Activité des médecins généralistes',
-      '8810A': 'Aide à domicile',
-      '8899B': 'Action sociale sans hébergement (non classée ailleurs)',
+      // --- Agriculture / Industrie (sélection courante) ---
+      '0111Z': 'Culture de céréales',
+      '0210Z': 'Sylviculture',
+      '1071A': 'Fabrication industrielle de pain',
+      '2059Z': 'Fabrication d\'autres produits chimiques',
+      '2229A': 'Fabrication de pièces techniques en matières plastiques',
+      '2229B': 'Fabrication de produits de consommation courante en plastique',
+      '2680Z': 'Fabrication de supports magnétiques et optiques',
+      '2790Z': 'Fabrication d\'autres équipements électriques',
+      '3103Z': 'Fabrication de matelas',
+      '3109A': 'Fabrication de sièges d\'ameublement d\'intérieur',
+      '3109B': 'Fabrication d\'autres meubles et industries connexes de l\'ameublement',
+      '3212Z': 'Fabrication d\'articles de joaillerie et bijouterie',
+      '3250A': 'Fabrication de matériel médico-chirurgical et dentaire',
+      '3250B': 'Fabrication de lunettes, verres et prothèses oculaires',
+      '3299Z': 'Autres activités manufacturières n.c.a.',
+      '3600Z': 'Captage, traitement et distribution d\'eau',
+      '3811Z': 'Collecte des déchets non dangereux',
+
+      // --- Construction ---
+      '4110A': 'Promotion immobilière de logements',
+      '4120A': 'Construction de maisons individuelles',
+      '4120B': 'Construction d\'autres bâtiments',
+      '4211Z': 'Construction de routes et autoroutes',
+      '4321A': 'Travaux d\'installation électrique',
+      '4322A': 'Travaux d\'installation d\'eau et de gaz',
+      '4322B': 'Travaux d\'installation d\'équipements thermiques et de climatisation',
+      '4329A': 'Travaux d\'isolation',
+      '4331Z': 'Travaux de plâtrerie',
+      '4332A': 'Travaux de menuiserie bois et PVC',
+      '4332B': 'Travaux de menuiserie métallique, serrurerie',
+      '4333Z': 'Travaux de revêtement des sols et des murs',
+      '4334Z': 'Travaux de peinture et vitrerie',
+      '4391A': 'Travaux de charpente',
+      '4391B': 'Travaux de couverture',
+      '4399C': 'Travaux de maçonnerie générale et gros œuvre',
+
+      // --- Commerce (très détaillé - cœur de l'activité clients TOUS ERGO) ---
+      '4511Z': 'Commerce de voitures et de véhicules automobiles légers',
+      '4520A': 'Entretien et réparation de véhicules automobiles légers',
+      '4532Z': 'Commerce de détail d\'équipements automobiles',
+      '4611Z': 'Intermédiaires du commerce en matières premières agricoles',
+      '4618Z': 'Intermédiaires spécialisés dans le commerce d\'autres produits spécifiques',
+      '4619A': 'Intermédiaires du commerce en produits divers (courtiers, agents commerciaux)',
+      '4619B': 'Autres intermédiaires du commerce en produits divers',
+      '4644Z': 'Commerce de gros de parfumerie et de produits de beauté',
+      '4645Z': 'Commerce de gros de produits pharmaceutiques',
+      '4646Z': 'Commerce de gros de matériel médical',
+      '4647Z': 'Commerce de gros de meubles, tapis et appareils d\'éclairage',
+      '4649Z': 'Commerce de gros d\'autres biens domestiques',
+      '4665Z': 'Commerce de gros de mobilier de bureau',
+      '4666Z': 'Commerce de gros d\'autres machines et équipements de bureau',
+      '4669A': 'Commerce de gros de matériel agricole',
+      '4669B': 'Commerce de gros de fournitures et équipements industriels divers',
+      '4669C': 'Commerce de gros de fournitures et équipements divers pour le commerce et les services',
+      '4674A': 'Commerce de gros de quincaillerie',
+      '4690Z': 'Commerce de gros non spécialisé',
+      '4711A': 'Commerce de détail de produits surgelés',
+      '4711B': 'Commerce d\'alimentation générale',
+      '4711C': 'Supérettes',
+      '4711D': 'Supermarchés',
+      '4711F': 'Hypermarchés',
+      '4719A': 'Grands magasins',
+      '4719B': 'Autres commerces de détail en magasin non spécialisé',
+      '4721Z': 'Commerce de détail de fruits et légumes',
+      '4741Z': 'Commerce de détail d\'ordinateurs et de logiciels',
+      '4743Z': 'Commerce de détail de matériels audio et vidéo',
+      '4751Z': 'Commerce de détail de textiles',
+      '4752A': 'Commerce de détail de quincaillerie, peintures et verres (petite surface)',
+      '4752B': 'Commerce de détail de quincaillerie, peintures et verres (grande surface)',
+      '4753Z': 'Commerce de détail de tapis, moquettes et revêtements de murs et sols',
+      '4754Z': 'Commerce de détail d\'appareils électroménagers',
+      '4759A': 'Commerce de détail de meubles',
+      '4759B': 'Commerce de détail d\'autres équipements du foyer',
+      '4761Z': 'Commerce de détail de livres',
+      '4771Z': 'Commerce de détail d\'habillement',
+      '4772A': 'Commerce de détail de la chaussure',
+      '4772B': 'Commerce de détail de maroquinerie et d\'articles de voyage',
+      '4773Z': 'Commerce de détail de produits pharmaceutiques (pharmacie)',
+      '4774Z': 'Commerce de détail d\'articles médicaux et orthopédiques',
+      '4775Z': 'Commerce de détail de parfumerie et de produits de beauté',
+      '4776Z': 'Commerce de détail de fleurs, plantes et animaux de compagnie',
+      '4778A': 'Commerce de détail d\'optique',
+      '4778B': 'Commerce de détail de charbons et combustibles',
+      '4778C': 'Autres commerces de détail spécialisés divers',
+      '4779Z': 'Commerce de détail de biens d\'occasion en magasin',
+      '4781Z': 'Commerce de détail alimentaire sur éventaires et marchés',
+      '4789Z': 'Autres commerces de détail sur éventaires et marchés',
+      '4791A': 'Vente à distance sur catalogue général',
+      '4791B': 'Vente à distance sur catalogue spécialisé (e-commerce)',
+      '4799A': 'Vente à domicile',
+      '4799B': 'Vente par automates et autres commerces de détail hors magasin',
+
+      // --- Transport / Logistique ---
+      '4941A': 'Transports routiers de fret interurbains',
+      '4941B': 'Transports routiers de fret de proximité',
+      '4942Z': 'Services de déménagement',
+      '5210A': 'Entreposage et stockage frigorifique',
+      '5210B': 'Entreposage et stockage non frigorifique',
+      '5221Z': 'Services auxiliaires des transports terrestres',
+      '5229A': 'Messagerie, fret express',
+      '5320Z': 'Autres activités de poste et de courrier',
+
+      // --- Hébergement / Restauration ---
+      '5510Z': 'Hôtels et hébergement similaire',
+      '5610A': 'Restauration traditionnelle',
+      '5610C': 'Restauration de type rapide',
+      '5630Z': 'Débits de boissons',
+
+      // --- Information / Communication ---
+      '5811Z': 'Édition de livres',
+      '5820C': 'Édition de logiciels applicatifs',
+      '6201Z': 'Programmation informatique',
+      '6202A': 'Conseil en systèmes et logiciels informatiques',
+      '6202B': 'Tierce maintenance de systèmes et d\'applications informatiques',
+      '6203Z': 'Gestion d\'installations informatiques',
+      '6209Z': 'Autres activités informatiques',
+      '6311Z': 'Traitement de données, hébergement et activités connexes',
+      '6312Z': 'Portails Internet',
+      '6420Z': 'Activités des sociétés holding',
+
+      // --- Finance / Assurance / Immobilier ---
+      '6419Z': 'Autres intermédiations monétaires (banques)',
+      '6511Z': 'Assurance vie',
+      '6512Z': 'Autres assurances',
+      '6622Z': 'Activités des agents et courtiers d\'assurances',
+      '6820A': 'Location de logements',
+      '6820B': 'Location de terrains et d\'autres biens immobiliers',
+      '6831Z': 'Agences immobilières',
+      '6832A': 'Administration d\'immeubles et autres biens immobiliers',
+
+      // --- Activités spécialisées, scientifiques et techniques ---
+      '6910Z': 'Activités juridiques',
+      '6920Z': 'Activités comptables',
+      '7010Z': 'Activités des sièges sociaux',
+      '7022Z': 'Conseil pour les affaires et autres conseils de gestion',
+      '7111Z': 'Activités d\'architecture',
+      '7112B': 'Ingénierie, études techniques',
+      '7120B': 'Analyses, essais et inspections techniques',
+      '7311Z': 'Activités des agences de publicité',
+      '7320Z': 'Études de marché et sondages',
+      '7410Z': 'Activités spécialisées de design',
+      '7420Z': 'Activités photographiques',
+      '7500Z': 'Activités vétérinaires',
+
+      // --- Services administratifs et de soutien (dont location de matériel médical) ---
+      '7711A': 'Location de courte durée de voitures et véhicules légers',
+      '7729Z': 'Location et location-bail d\'autres biens personnels et domestiques (matériel médical, aide à la mobilité...)',
+      '7810Z': 'Activités des agences de placement de main-d\'œuvre',
+      '7820Z': 'Activités des agences de travail temporaire',
+      '8110Z': 'Activités combinées de soutien lié aux bâtiments',
+      '8121Z': 'Nettoyage courant des bâtiments',
+      '8129A': 'Désinfection, désinsectisation, dératisation',
+      '8130Z': 'Services d\'aménagement paysager',
+      '8211Z': 'Services administratifs combinés de bureau',
+      '8220Z': 'Activités de centres d\'appels',
+      '8299Z': 'Autres activités de soutien aux entreprises n.c.a.',
+
+      // --- Administration publique ---
       '8411Z': 'Administration publique générale',
+      '8412Z': 'Administration publique (santé, enseignement, culture, action sociale)',
+      '8413Z': 'Administration publique (tutelle des activités économiques)',
+      '8422Z': 'Défense',
+      '8423Z': 'Justice',
+      '8424Z': 'Activités d\'ordre public et de sécurité civile',
+      '8430A': 'Activités générales de sécurité sociale',
+      '8430C': 'Distribution sociale de revenus',
+
+      // --- Enseignement ---
+      '8510Z': 'Enseignement pré-primaire',
       '8520Z': 'Enseignement primaire',
       '8531Z': 'Enseignement secondaire général',
+      '8532Z': 'Enseignement secondaire technique ou professionnel',
+      '8541Z': 'Enseignement post-secondaire non supérieur',
+      '8542Z': 'Enseignement supérieur',
+      '8551Z': 'Enseignement de disciplines sportives et d\'activités de loisirs',
+      '8559A': 'Formation continue d\'adultes',
+      '8559B': 'Autres enseignements',
+
+      // --- Santé humaine et action sociale (détaillé - secteur clé TOUS ERGO) ---
+      '8610Z': 'Activités hospitalières',
+      '8621Z': 'Activité des médecins généralistes',
+      '8622A': 'Activités de radiodiagnostic et de radiothérapie',
+      '8622B': 'Activités chirurgicales',
+      '8622C': 'Autres activités des médecins spécialistes',
+      '8623Z': 'Pratique dentaire',
+      '8690A': 'Ambulances',
+      '8690B': 'Laboratoires d\'analyses médicales',
+      '8690C': 'Centres de collecte et banques d\'organes',
+      '8690D': 'Activités des infirmiers et des sages-femmes',
+      '8690E': 'Rééducation, appareillage, pédicures-podologues (kinésithérapeutes, orthoprothésistes...)',
+      '8690F': 'Activités de santé humaine non classées ailleurs',
+      '8710A': 'Hébergement médicalisé pour personnes âgées (EHPAD)',
+      '8710B': 'Hébergement médicalisé pour enfants handicapés',
+      '8710C': 'Hébergement médicalisé pour adultes handicapés et autres hébergements médicalisés',
+      '8720A': 'Hébergement social pour handicapés mentaux et malades mentaux',
+      '8720B': 'Hébergement social pour toxicomanes',
+      '8730A': 'Hébergement social pour personnes âgées',
+      '8730B': 'Hébergement social pour handicapés physiques',
+      '8790A': 'Hébergement social pour enfants en difficultés',
+      '8790B': 'Hébergement social pour adultes et familles en difficultés',
+      '8810A': 'Aide à domicile',
+      '8810B': 'Accompagnement sans hébergement d\'adultes handicapés ou de personnes âgées',
+      '8810C': 'Aide par le travail',
+      '8891A': 'Accueil de jeunes enfants',
+      '8891B': 'Accompagnement sans hébergement d\'enfants handicapés',
+      '8899A': 'Autre accompagnement sans hébergement d\'enfants et d\'adolescents',
+      '8899B': 'Action sociale sans hébergement (non classée ailleurs)',
+
+      // --- Arts, spectacles, loisirs ---
+      '9001Z': 'Arts du spectacle vivant',
+      '9102Z': 'Gestion des musées',
+      '9311Z': 'Gestion d\'installations sportives',
+      '9312Z': 'Activités de clubs de sports',
+      '9319Z': 'Autres activités liées au sport',
+      '9321Z': 'Activités des parcs d\'attractions et parcs à thèmes',
+      '9329Z': 'Autres activités récréatives et de loisirs',
+
+      // --- Autres activités de services (associations, réparation, services personnels) ---
+      '9411Z': 'Activités des organisations patronales et consulaires',
+      '9412Z': 'Activités des organisations professionnelles',
+      '9420Z': 'Activités des syndicats de salariés',
+      '9491Z': 'Activités des organisations religieuses',
+      '9492Z': 'Activités des organisations politiques',
+      '9499Z': 'Autres organisations associatives (associations diverses)',
+      '9511Z': 'Réparation d\'ordinateurs et d\'équipements périphériques',
+      '9522Z': 'Réparation d\'appareils électroménagers et d\'équipements pour la maison',
+      '9524Z': 'Réparation de meubles et d\'équipements du foyer',
+      '9529Z': 'Réparation d\'autres biens personnels et domestiques',
+      '9602A': 'Coiffure',
+      '9602B': 'Soins de beauté',
+      '9603Z': 'Services funéraires',
+      '9604Z': 'Entretien corporel',
+      '9609Z': 'Autres services personnels n.c.a.',
+
+      // --- Ménages / Extra-territorial ---
+      '9700Z': 'Activités des ménages en tant qu\'employeurs de personnel domestique',
+      '9900Z': 'Activités des organisations et organismes extraterritoriaux',
     };
+
+    // Normalise un code NAF/APE pour la recherche dans NAF_FALLBACK :
+    // supprime tout ce qui n'est pas alphanumérique et met en majuscule.
+    // Utile car l'API renvoie parfois le code avec un point ("47.73Z") et parfois sans ("4773Z").
+    function normalizeNafCode(code) {
+      return (code || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    }
 
     function isCustomerViewPage() {
       if (/\/sell\/customers\/\d+\/view/.test(location.pathname)) return true;
@@ -550,7 +812,7 @@ https://www.tousergo.com`,
       const etatEtab = etab.etat_administratif;
       const activiteCode = entreprise.activite_principale || etab.activite_principale || '';
       const activiteLibelle = entreprise.libelle_activite_principale || etab.libelle_activite_principale
-        || NAF_FALLBACK[activiteCode] || null;
+        || NAF_FALLBACK[normalizeNafCode(activiteCode)] || null;
       const dateCreation = entreprise.date_creation || etab.date_creation || null;
       const effectif = entreprise.tranche_effectif_salarie_intitule || entreprise.tranche_effectif_salarie || null;
 
@@ -1951,7 +2213,7 @@ https://www.tousergo.com`,
                       if (resData.result && resData.result.length > 0) {
                           const orderId = resData.result[0].id;
                           const orderURL = `${odooBaseURL}/web#id=${orderId}&model=sale.order&view_type=form&menu_id=171`;
-                          window.location.href = orderURL;
+                          window.open(orderURL, '_blank');
                           button.textContent = "Trouvé !";
                           button.style.backgroundColor = "#28a745";
                       } else {
@@ -2067,17 +2329,17 @@ https://www.tousergo.com`,
                       }
 
                       if (orderURL) {
-                          window.location.href = orderURL;
+                          window.open(orderURL, '_blank');
                           button.textContent = "Trouvé !";
                           button.style.backgroundColor = "#28a745";
                       } else {
                           console.warn("[Bouton Presta] Lien direct non trouvé, repli sur la recherche. Extrait HTML pour debug :", html.substring(0, 3000));
-                          window.location.href = searchURL;
+                          window.open(searchURL, '_blank');
                           button.textContent = "Ouvert (recherche)";
                           button.style.backgroundColor = "#df0067";
                       }
                   } catch (e) {
-                      window.location.href = searchURL;
+                      window.open(searchURL, '_blank');
                       button.textContent = "Ouvert (recherche)";
                       button.style.backgroundColor = "#df0067";
                   }
@@ -2088,7 +2350,7 @@ https://www.tousergo.com`,
                   }, 3000);
               },
               onerror: function() {
-                  window.location.href = searchURL;
+                  window.open(searchURL, '_blank');
                   button.textContent = "Ouvert (recherche)";
                   button.style.backgroundColor = "#df0067";
                   setTimeout(() => {
@@ -2374,7 +2636,7 @@ https://www.tousergo.com`,
                           const chosen = withTracking.find(p => p.state === 'done') || withTracking[0];
 
                           if (chosen && chosen.carrier_tracking_url) {
-                              window.location.href = chosen.carrier_tracking_url;
+                              window.open(chosen.carrier_tracking_url, '_blank');
                               button.textContent = "Suivi ouvert !";
                               button.style.backgroundColor = "#28a745";
                           } else {
@@ -2933,7 +3195,7 @@ https://www.tousergo.com`,
 // ============================================================================
 (function () {
   'use strict';
-  // Note : app.crisp.chat retiré de la liste des domaines
+  // Désactivation sur app.crisp.chat (retiré de la liste)
   const LDF_HOSTS = new Set([
     'www.tousergo.com',
     'sellercentral.amazon.fr',
@@ -3401,7 +3663,7 @@ https://www.tousergo.com`,
         #te-ldf-panel .te-ldf-order-meta { color:#8a90a0; font-size:10.5px; }
         #te-ldf-panel .te-ldf-order-icons { display:flex; gap:4px; flex-shrink:0; }
         #te-ldf-panel .te-ldf-loading { font-size:10.5px; color:#a5abb5; font-style:italic; margin-top:4px; }
-        
+
         /* Boutons explicites "Presta" et "Odoo" pour les commandes */
         #te-ldf-panel .te-ldf-icon-btn { display:inline-flex; align-items:center; justify-content:center;
           padding:2px 6px; border-radius:4px; font-size:10px; font-weight:600; text-decoration:none;
@@ -3439,7 +3701,6 @@ https://www.tousergo.com`,
         clearTimeout(ldfAutoCloseTimer);
         ldfAutoCloseTimer = null;
       }
-      // Fermeture auto ajustée à 5 minutes (5 * 60 * 1000)
       ldfAutoCloseTimer = setTimeout(() => {
         const panel = document.getElementById('te-ldf-panel');
         if (panel) {
@@ -4250,7 +4511,7 @@ https://www.tousergo.com`,
 
     let trackingHtml = '';
     if (picking && picking.carrier_tracking_url) {
-      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_self" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
+      trackingHtml = `<a href="${picking.carrier_tracking_url}" target="_blank" class="te-rt-track-btn">📦 Voir le suivi colis</a>`;
     } else if (picking && picking.carrier_tracking_ref) {
       trackingHtml = `<span class="te-rt-track-ref">N° suivi : ${escapeHtml(picking.carrier_tracking_ref)} (pas de lien direct)</span>`;
     }
