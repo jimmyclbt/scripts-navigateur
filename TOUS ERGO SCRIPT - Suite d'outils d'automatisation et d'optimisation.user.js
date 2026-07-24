@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.2.2
+// @version      5.2.3
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4868,12 +4868,20 @@ https://www.tousergo.com`,
       (async () => {
         if (document.getElementById('te-rt-compose-backdrop')) return;
 
-        let template, targetModel, resId, rendered;
+        let template, targetModel, resId, composerId, rendered;
         try {
           ({ template, targetModel, resId } = await resolveTemplateTarget(templateName, retourId));
-          const genResult = await odooCall('mail.template', 'generate_email',
-            [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_to', 'email_to'] });
-          rendered = genResult && genResult[resId];
+
+          // On passe par l'assistant mail.compose.message (create + onchange_template_id + send_mail),
+          // exactement comme le fait le bouton natif Odoo "Envoyer un message" + choix d'un modèle.
+          // Un message_post "brut" (même avec subtype_xmlid comment + partner_ids) finissait en note
+          // interne sur cette instance ; ce chemin est le seul qui envoie vraiment le mail au client.
+          composerId = await odooCall('mail.compose.message', 'create', [{
+            model: targetModel, res_id: resId, composition_mode: 'comment',
+          }]);
+          const onchangeResult = await odooCall('mail.compose.message', 'onchange_template_id',
+            [[composerId], template.id, 'comment', targetModel, resId], {});
+          rendered = onchangeResult && onchangeResult.value;
         } catch (e) {
           alert(`Impossible de préparer le mail "${templateName}" : ${e.message}`);
           resolveModal(false);
@@ -4899,7 +4907,7 @@ https://www.tousergo.com`,
             style="display:block; width:100%; box-sizing:border-box; margin:4px 0 12px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
           <label style="display:block; font-size:12px; font-weight:600; color:#555;">Message</label>
           <div id="te-rt-compose-body" contenteditable="true"
-            style="min-height:180px; max-height:340px; overflow-y:auto; border:1px solid #d5dde0; border-radius:4px; padding:10px; margin:4px 0 16px; font-size:13px; line-height:1.5;">${rendered.body_html || ''}</div>
+            style="min-height:180px; max-height:340px; overflow-y:auto; border:1px solid #d5dde0; border-radius:4px; padding:10px; margin:4px 0 16px; font-size:13px; line-height:1.5;">${rendered.body || ''}</div>
           <div style="display:flex; gap:10px; justify-content:flex-end;">
             <button type="button" id="te-rt-compose-cancel" style="padding:8px 16px; font-size:13px; border:1px solid #ccc; border-radius:5px; background:#fff; color:#444; cursor:pointer;">Ne pas envoyer</button>
             <button type="button" id="te-rt-compose-send" style="padding:8px 18px; font-size:13px; font-weight:600; border:none; border-radius:5px; background:${accentColor}; color:#fff; cursor:pointer;">✉️ Envoyer au client</button>
@@ -4910,8 +4918,12 @@ https://www.tousergo.com`,
         document.body.appendChild(backdrop);
 
         function closeModal(sent) { backdrop.remove(); resolveModal(sent); }
-        box.querySelector('#te-rt-compose-cancel').addEventListener('click', () => closeModal(false));
-        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(false); });
+        box.querySelector('#te-rt-compose-cancel').addEventListener('click', () => {
+          // On supprime le brouillon d'assistant non envoyé pour ne pas laisser de résidus.
+          odooCall('mail.compose.message', 'unlink', [[composerId]], {}).catch(() => {});
+          closeModal(false);
+        });
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) box.querySelector('#te-rt-compose-cancel').click(); });
 
         box.querySelector('#te-rt-compose-send').addEventListener('click', async () => {
           const sendBtn = box.querySelector('#te-rt-compose-send');
@@ -4929,13 +4941,8 @@ https://www.tousergo.com`,
           statusEl.textContent = '';
 
           try {
-            // On force les destinataires du modèle (partner_ids calculés depuis partner_to/email_to
-            // du modèle Odoo) : sans ça, message_post ne notifie que les abonnés du dossier et le
-            // mail part comme une simple note interne au lieu d'un vrai mail au client.
-            await odooCall(targetModel, 'message_post', [[resId]], {
-              subject, body: bodyHtml, message_type: 'comment', subtype_xmlid: 'mail.mt_comment',
-              partner_ids: (rendered.partner_ids || []),
-            });
+            await odooCall('mail.compose.message', 'write', [[composerId], { subject, body: bodyHtml }]);
+            await odooCall('mail.compose.message', 'send_mail', [[composerId]], {});
             statusEl.innerHTML = '<span style="color:#2e7d32">✓ Mail envoyé. Rechargement de la page…</span>';
             setTimeout(() => closeModal(true), 900);
           } catch (e) {
@@ -5600,11 +5607,18 @@ https://www.tousergo.com`,
   async function showRefundEmailModal(template, targetModel, resId) {
     if (document.getElementById('te-cm-refund-email-backdrop')) return;
 
-    let rendered;
+    // On passe par l'assistant mail.compose.message (create + onchange_template_id + send_mail),
+    // exactement comme le fait le bouton natif Odoo "Envoyer un message" + choix d'un modèle.
+    // Un message_post "brut" finissait en note interne sur cette instance ; ce chemin est le seul
+    // qui envoie vraiment le mail au client.
+    let composerId, rendered;
     try {
-      const genResult = await odooCall('mail.template', 'generate_email',
-        [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_to', 'email_to'] });
-      rendered = genResult && genResult[resId];
+      composerId = await odooCall('mail.compose.message', 'create', [{
+        model: targetModel, res_id: resId, composition_mode: 'comment',
+      }]);
+      const onchangeResult = await odooCall('mail.compose.message', 'onchange_template_id',
+        [[composerId], template.id, 'comment', targetModel, resId], {});
+      rendered = onchangeResult && onchangeResult.value;
     } catch (e) {
       console.warn('[TE-Compta] Préparation du mail de remboursement impossible', e);
       rendered = null;
@@ -5628,7 +5642,7 @@ https://www.tousergo.com`,
         style="display:block; width:100%; box-sizing:border-box; margin:4px 0 12px; padding:8px 10px; font-size:13px; border:1px solid #d5dde0; border-radius:4px; font-family:inherit;">
       <label style="display:block; font-size:12px; font-weight:600; color:#555;">Message</label>
       <div id="te-cm-refund-body" contenteditable="true"
-        style="min-height:180px; max-height:340px; overflow-y:auto; border:1px solid #d5dde0; border-radius:4px; padding:10px; margin:4px 0 16px; font-size:13px; line-height:1.5;">${rendered.body_html || ''}</div>
+        style="min-height:180px; max-height:340px; overflow-y:auto; border:1px solid #d5dde0; border-radius:4px; padding:10px; margin:4px 0 16px; font-size:13px; line-height:1.5;">${rendered.body || ''}</div>
       <div style="display:flex; gap:10px; justify-content:flex-end;">
         <button type="button" id="te-cm-refund-cancel" style="padding:8px 16px; font-size:13px; border:1px solid #ccc; border-radius:5px; background:#fff; color:#444; cursor:pointer;">Ne pas envoyer</button>
         <button type="button" id="te-cm-refund-send" style="padding:8px 18px; font-size:13px; font-weight:600; border:none; border-radius:5px; background:#2e7d32; color:#fff; cursor:pointer;">✉️ Envoyer au client</button>
@@ -5639,8 +5653,11 @@ https://www.tousergo.com`,
     document.body.appendChild(backdrop);
 
     function closeModal() { backdrop.remove(); }
-    box.querySelector('#te-cm-refund-cancel').addEventListener('click', closeModal);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+    box.querySelector('#te-cm-refund-cancel').addEventListener('click', () => {
+      odooCall('mail.compose.message', 'unlink', [[composerId]], {}).catch(() => {});
+      closeModal();
+    });
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) box.querySelector('#te-cm-refund-cancel').click(); });
 
     box.querySelector('#te-cm-refund-send').addEventListener('click', async () => {
       const sendBtn = box.querySelector('#te-cm-refund-send');
@@ -5658,13 +5675,8 @@ https://www.tousergo.com`,
       statusEl.textContent = '';
 
       try {
-        // On force les destinataires du modèle (partner_ids calculés depuis partner_to/email_to
-        // du modèle Odoo) : sans ça, message_post ne notifie que les abonnés du dossier et le
-        // mail part comme une simple note interne au lieu d'un vrai mail au client.
-        await odooCall(targetModel, 'message_post', [[resId]], {
-          subject, body: bodyHtml, message_type: 'comment', subtype_xmlid: 'mail.mt_comment',
-          partner_ids: (rendered.partner_ids || []),
-        });
+        await odooCall('mail.compose.message', 'write', [[composerId], { subject, body: bodyHtml }]);
+        await odooCall('mail.compose.message', 'send_mail', [[composerId]], {});
         statusEl.innerHTML = '<span style="color:#2e7d32">✓ Mail envoyé. Rechargement de la page…</span>';
         setTimeout(() => location.reload(), 900);
       } catch (e) {
