@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.2.0
+// @version      5.2.1
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4802,6 +4802,11 @@ https://www.tousergo.com`,
   async function renderPanel(retourId) {
     if (closedForId.has(retourId)) return;
 
+    // Un seul popup à la fois : si on arrive sur un retour alors que le panneau "comptabilité"
+    // (module 9, autre page/modèle) est encore affiché, on le retire.
+    const strayComptaPanel = document.getElementById('te-cm-panel');
+    if (strayComptaPanel) strayComptaPanel.remove();
+
     const panel = getOrCreatePanel();
     const body = panel.querySelector('#te-rt-body');
     body.innerHTML = `<div class="te-rt-loading">Chargement des infos commande…</div>`;
@@ -4867,7 +4872,7 @@ https://www.tousergo.com`,
         try {
           ({ template, targetModel, resId } = await resolveTemplateTarget(templateName, retourId));
           const genResult = await odooCall('mail.template', 'generate_email',
-            [[template.id], [resId]], { fields: ['subject', 'body_html'] });
+            [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_ids', 'email_to'] });
           rendered = genResult && genResult[resId];
         } catch (e) {
           alert(`Impossible de préparer le mail "${templateName}" : ${e.message}`);
@@ -4924,10 +4929,12 @@ https://www.tousergo.com`,
           statusEl.textContent = '';
 
           try {
-            // message_post notifie automatiquement les abonnés du dossier (dont le client), pas
-            // besoin de préciser partner_ids tant que le client est déjà abonné à la commande.
+            // On force les destinataires du modèle (partner_ids calculés depuis partner_to/email_to
+            // du modèle Odoo) : sans ça, message_post ne notifie que les abonnés du dossier et le
+            // mail part comme une simple note interne au lieu d'un vrai mail au client.
             await odooCall(targetModel, 'message_post', [[resId]], {
               subject, body: bodyHtml, message_type: 'comment', subtype_xmlid: 'mail.mt_comment',
+              partner_ids: (rendered.partner_ids || []),
             });
             statusEl.innerHTML = '<span style="color:#2e7d32">✓ Mail envoyé. Rechargement de la page…</span>';
             setTimeout(() => closeModal(true), 900);
@@ -5596,7 +5603,7 @@ https://www.tousergo.com`,
     let rendered;
     try {
       const genResult = await odooCall('mail.template', 'generate_email',
-        [[template.id], [resId]], { fields: ['subject', 'body_html'] });
+        [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_ids', 'email_to'] });
       rendered = genResult && genResult[resId];
     } catch (e) {
       console.warn('[TE-Compta] Préparation du mail de remboursement impossible', e);
@@ -5651,10 +5658,12 @@ https://www.tousergo.com`,
       statusEl.textContent = '';
 
       try {
-        // message_post notifie automatiquement les abonnés du dossier (dont le client), pas besoin
-        // de préciser partner_ids tant que le client est déjà abonné à la commande/facture.
+        // On force les destinataires du modèle (partner_ids calculés depuis partner_to/email_to
+        // du modèle Odoo) : sans ça, message_post ne notifie que les abonnés du dossier et le
+        // mail part comme une simple note interne au lieu d'un vrai mail au client.
         await odooCall(targetModel, 'message_post', [[resId]], {
           subject, body: bodyHtml, message_type: 'comment', subtype_xmlid: 'mail.mt_comment',
+          partner_ids: (rendered.partner_ids || []),
         });
         statusEl.innerHTML = '<span style="color:#2e7d32">✓ Mail envoyé. Rechargement de la page…</span>';
         setTimeout(() => location.reload(), 900);
@@ -5686,8 +5695,19 @@ https://www.tousergo.com`,
     }
   }
 
+  // Retenu une fois pour toutes par facture : évite de re-déclencher un chargement/suppression
+  // en boucle (et donc le clignotement + "Chargement..." infini) sur une facture qui n'est pas un
+  // avoir ou qui n'a pas de retour actif — removePanel() est lui-même une mutation DOM qui
+  // relançait sinon immédiatement un nouveau renderPanel().
+  const notApplicableIds = new Set();
+
   async function renderPanel(moveId) {
     if (closedForId.has(moveId)) return;
+
+    // Un seul popup à la fois : si on arrive sur un avoir alors que le panneau "retour"
+    // (module 8, autre page/modèle) est encore affiché, on le retire.
+    const strayRetourPanel = document.getElementById('te-rt-panel');
+    if (strayRetourPanel) strayRetourPanel.remove();
 
     const panel = getOrCreatePanel();
     const body = panel.querySelector('#te-cm-body');
@@ -5703,7 +5723,7 @@ https://www.tousergo.com`,
       return;
     }
     if (getMoveIdFromHash() !== moveId || closedForId.has(moveId)) return;
-    if (!info.isRefund) { removePanel(); return; }
+    if (!info.isRefund) { notApplicableIds.add(moveId); removePanel(); return; }
 
     const titleRef = info.refPrestashop || (info.move.name && info.move.name !== '/' ? info.move.name : 'Avoir');
     panel.querySelector('#te-cm-title').textContent = `🧾 ${titleRef}`;
@@ -5729,6 +5749,7 @@ https://www.tousergo.com`,
       if (lastRenderedId !== null) { removePanel(); lastRenderedId = null; }
       return;
     }
+    if (notApplicableIds.has(id)) return;
     if (id === lastRenderedId && document.getElementById(PANEL_ID)) return;
     if (!document.querySelector('.o_form_view')) return;
     lastRenderedId = id;
