@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.2.1
+// @version      5.2.2
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4872,7 +4872,7 @@ https://www.tousergo.com`,
         try {
           ({ template, targetModel, resId } = await resolveTemplateTarget(templateName, retourId));
           const genResult = await odooCall('mail.template', 'generate_email',
-            [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_ids', 'email_to'] });
+            [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_to', 'email_to'] });
           rendered = genResult && genResult[resId];
         } catch (e) {
           alert(`Impossible de préparer le mail "${templateName}" : ${e.message}`);
@@ -5603,7 +5603,7 @@ https://www.tousergo.com`,
     let rendered;
     try {
       const genResult = await odooCall('mail.template', 'generate_email',
-        [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_ids', 'email_to'] });
+        [[template.id], [resId]], { fields: ['subject', 'body_html', 'partner_to', 'email_to'] });
       rendered = genResult && genResult[resId];
     } catch (e) {
       console.warn('[TE-Compta] Préparation du mail de remboursement impossible', e);
