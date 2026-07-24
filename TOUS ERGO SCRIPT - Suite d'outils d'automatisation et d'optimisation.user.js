@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.2.3
+// @version      5.2.4
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -4848,9 +4848,20 @@ https://www.tousergo.com`,
 
   async function resolveTemplateTarget(templateName, retourId) {
     const templates = await odooCall('mail.template', 'search_read',
-      [[['name', '=', templateName]]], { fields: ['id', 'model'], limit: 1 });
+      [[['name', '=', templateName]]], { fields: ['id', 'model', 'user_signature'], limit: 1 });
     const template = templates && templates[0];
     if (!template) throw new Error(`Modèle mail introuvable : "${templateName}"`);
+
+    // Le modèle contient déjà sa propre signature TOUS ERGO dans le corps : on désactive l'option
+    // Odoo "Ajouter la signature" pour ne pas dupliquer avec celle de l'agent connecté.
+    if (template.user_signature) {
+      try {
+        await odooCall('mail.template', 'write', [[template.id], { user_signature: false }]);
+        template.user_signature = false;
+      } catch (e) {
+        console.warn('[TE-Retour] Désactivation de la signature auto impossible', e);
+      }
+    }
 
     let resId = retourId;
     let targetModel = template.model || 'eggs.presta.retour';
@@ -5692,11 +5703,21 @@ https://www.tousergo.com`,
     refundEmailPromptedIds.add(moveId);
     try {
       const templates = await odooCall('mail.template', 'search_read',
-        [[['name', '=', REFUND_TEMPLATE_NAME]]], { fields: ['id', 'model'], limit: 1 });
+        [[['name', '=', REFUND_TEMPLATE_NAME]]], { fields: ['id', 'model', 'user_signature'], limit: 1 });
       const template = templates && templates[0];
       if (!template) {
         console.warn(`[TE-Compta] Modèle mail introuvable : "${REFUND_TEMPLATE_NAME}"`);
         return;
+      }
+      // Le modèle contient déjà sa propre signature TOUS ERGO dans le corps : on désactive l'option
+      // Odoo "Ajouter la signature" pour ne pas dupliquer avec celle de l'agent connecté.
+      if (template.user_signature) {
+        try {
+          await odooCall('mail.template', 'write', [[template.id], { user_signature: false }]);
+          template.user_signature = false;
+        } catch (e) {
+          console.warn('[TE-Compta] Désactivation de la signature auto impossible', e);
+        }
       }
       let targetModel = template.model || 'sale.order';
       let resId = targetModel === 'account.move' ? moveId : info.orderId;
