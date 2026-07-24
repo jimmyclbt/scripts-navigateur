@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TOUS ERGO TOOLKIT - Suite d'outils d'automatisation et d'optimisation
 // @namespace    tousergo
-// @version      5.2.4
+// @version      5.2.5
 // @author       Jimmy COCQUEREL-BUSCOT
 // @description  Script unique regroupant tous les outils TOUS ERGO parmi lesquels : vérif SIRET + actions rapides PrestaShop, validation de compte par e-mail (Power Automate), boutons Marketplaces (Amazon/Mirakl), auto-remplissage facture Amazon, liens Odoo cliquables, fermeture auto d'onglet après synchro, levée de fiche téléphone flottante bas de page compacte (PrestaShop/Odoo), fiche Retour enrichie avec vraie date de livraison (Chronopost, La Poste/Colissimo, GLS, Kuehne+Nagel).
 // @match        https://www.tousergo.com/*
@@ -3104,7 +3104,7 @@ https://www.tousergo.com`,
                       !node.parentNode.closest('a')
                   ) {
                       const replaced = node.textContent.replace(REF_REGEX, ref => {
-                          return `<a href="${ODOO_URL_PREFIX}${ref}" target="_self" style="color: #007bff; text-decoration: underline;">${ref}</a>`;
+                          return `<a href="${ODOO_URL_PREFIX}${ref}" target="_blank" rel="noopener noreferrer" style="color: #007bff; text-decoration: underline;">${ref}</a>`;
                       });
 
                       const span = document.createElement('span');
